@@ -8,7 +8,7 @@ import os
 
 VBSCRIPT_ALLOW_VAR_NAME_REGEX = '\\b[a-zA-Z]{1}[a-zA-Z0-9_]{,254}\\b'
 
-class AllAutocomplete(sublime_plugin.EventListener):
+class ImportedClassesMethods(sublime_plugin.EventListener):
 
 	def on_query_completions(self, view, prefix, locations):
 		words = []
@@ -55,11 +55,22 @@ class AllAutocomplete(sublime_plugin.EventListener):
 				# elements of the matches array are tuples with a tiggers and the actualy contents
 				methods = extractMethods(path)
 				for method in methods:
-					trigger = "%s\t(%s)" % (method, relativePath) 
-					contents = method
+					comment = formatComment(method[0])
+					scope = method[1]
+					methodParamsStr = method[2]
+
+					if scope == 'private':
+						continue
+
+					if comment == None:
+						trigger = "%s\t(%s)" % (methodParamsStr, relativePath)
+					else:
+						trigger = "%s\t(%s)" % (methodParamsStr, relativePath)
+
+					contents = methodParamsStr
 					matches.append((trigger, contents))
 
-				# could exit the function and return the matches here
+		# could exit the function and return the matches here
 		return matches
 
 # Assumes that the file this is being run on contains valid VB syntax
@@ -71,13 +82,14 @@ def extractMethods(path):
 	# groups. The first will contain Sub or Function the second will be the methods
 	# name and the third will be the paramater list or None if there aren't any
 	# TODO - add bit so ignores private methods
-	matches = re.finditer('(\\bFunction\\b|\\bSub\\b) (' + VBSCRIPT_ALLOW_VAR_NAME_REGEX \
+	matches = re.finditer('((\\s*\'.*\\n)*)\\s*(\\bPrivate\\b|\\bPublic\\b|)\\s*(\\bFunction\\b|\\bSub\\b) (' + VBSCRIPT_ALLOW_VAR_NAME_REGEX \
 		+ ')(\\([a-zA-Z0-9\\,\\s]*\\))?', content, re.IGNORECASE)
 
 	# builds an array of the function and sub strings
 	methods = []
 	for match in matches:
-		methods.append(formatMethodStr(match))
+		comment, scope, methodParamsStr = formatMethodStr(match)
+		methods.append((str(comment), str(scope), str(methodParamsStr)))
 
 	return methods
 
@@ -101,7 +113,7 @@ def returnClassString(path):
 				continue
 
 			if len(writeLine) == 0:
-				pass
+				continue
 			elif writeLine[-1] == '_':
 				content += writeLine[:-1]
 				continue
@@ -136,13 +148,28 @@ def returnFileString(path):
 			writeLine = line.strip()
 
 			if len(writeLine) == 0:
-				pass
+				continue
 			elif writeLine[-1] == '_':
 				content += writeLine[:-1]
 				continue
 
 			content += writeLine + '\n'
 	return content
+
+# formats the comment returned by the regular expression
+def formatComment(inputComment):
+	if isinstance(inputComment, str):
+		if inputComment == '':
+			return None
+		else:
+			comment = ''
+			lines = inputComment.strip(' \n').split('\n')
+			for line in lines:
+				comment += line.lstrip(" '\t") + '\n'
+			return comment
+	else:
+		return None
+	output = ''
 
 # returns a standard format for the library relative paths
 def formatImportPath(str):
@@ -157,18 +184,37 @@ def formatImportPath(str):
 # removes white spaces and the words Function, Sub, ByVal and ByRef from the function definition string
 def formatMethodStr(match):
 	pattern = re.compile("(\\s|\\bbyval\\b|\\bbyref\\b|\\bFunction\\b|\\bSub\\b)", re.IGNORECASE)
+	COMMENT_POS = 1
+	METHOD_SCOPE_POS = 3
+	METHOD_TYPE = 4
+	METHOD_NAME_POS = 5
+	PARAMATERS_POS = 6
+
+	# gets the comment immedietly above the method name
+	if match.group(COMMENT_POS) == None:
+		comment = ''
+	else:
+		comment = match.group(COMMENT_POS)
+
+	# gets the scope of the method
+	if match.group(METHOD_SCOPE_POS) == None:
+		scope = 'public'
+	elif match.group(METHOD_SCOPE_POS) == '':
+		scope = 'public'
+	else:
+		scope = match.group(METHOD_SCOPE_POS).lower()
 
 	# case where there are no parmaters
-	if match.group(3) == None:
-		output = match.group(2) + '()'
+	if match.group(PARAMATERS_POS) == None:
+		methodParamsStr = match.group(METHOD_NAME_POS) + '()'
 	# case when there are paramaters
 	else:
-		output = match.group(2) + match.group(3)
+		methodParamsStr = match.group(METHOD_NAME_POS) + match.group(PARAMATERS_POS)
 
 	# removes white spaces and unwanted keywords
-	output = pattern.sub('', output)
+	methodParamsStr = pattern.sub('', methodParamsStr)
 
 	# allows for different formatting of subs and functions
-	if match.group(1).lower() == 'sub':
-		output = output.replace('()', '').replace('(', ' ').replace(')', '')
-	return output
+	if match.group(METHOD_TYPE).lower() == 'sub':
+		methodParamsStr = methodParamsStr.replace('()', '').replace('(', ' ').replace(')', '')
+	return comment, scope, methodParamsStr
