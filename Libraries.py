@@ -76,7 +76,7 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 		# could exit the function and return the matches here
 		return matches
 
-# Assumes that the file this is being run on contains valid VB syntax
+# extracts the methods of a class from a library file
 def extractMethods(path):
 	content = returnClassString(path)
 
@@ -210,22 +210,21 @@ def getCommentDescription(inputComment):
 	return output.rstrip()
 
 # adds a line to the output adding in a space if required (and ignoring some lines)
-def addLineAutoCompleteComment(comment, line):
+def addLineAutoCompleteComment(comment, inputLine):
+	# remove unwanted "'" characters from right of string (will cause occational
+	# errors where something is meant the be quoted)
+	# used as lots of people start and end comments with the "'" character as opposed
+	# to just starting them with it
+	line = inputLine.strip(" '")
 	# ignore enpty lines
 	if len(line) == 0:
 		pass
 	# ignore spacer lines of '#' characters (maybe achange so ignores lines that
 	# are made of just one character)
-	elif line.strip(" '") == '#' * len(line.strip(" '")):
+	elif line == '#' * len(line):
 		pass
 	else:
-		# remove unwanted "'" characters from right of string (will cause occational
-		# errors where something is meant the be quoted)
-		# used as lots of people start and comments with the "'" character as opposed
-		# to just ending them with it
-		comment += line.rstrip("'")
-		if line[-1] != ' ':
-			comment += ' '
+		comment += line + ' '
 	return comment
 
 # formats the comment returned by the regular expression
