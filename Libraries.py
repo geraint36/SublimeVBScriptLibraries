@@ -45,29 +45,29 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 					elif formatImportPath(imports[variableName]) != formatImportPath(relativePath):
 						continue
 
+					properties = extractProperties(path)
+					for prop in properties:
+						comment, scope, propertyName = prop
+						# ignores the private properties
+						if scope == 'private':
+							continue
+
+						trigger, contents = buildTriggerAndContents(comment, propertyName)
+						matches.append(('$%s' % trigger, contents))
+
 					# extract all the methods of the library and put them into the matches array 
 					# elements of the matches array are tuples with a tiggers and the actualy contents
 					methods = extractMethods(path)
+
 					for method in methods:
 						comment, scope, methodParamsStr = method
-						# removes whitespace and "'" character from left of comment lines
-						comment = formatComment(comment)
-						comment = getCommentDescription(comment)
-
 						# ignores the private methods
 						if scope == 'private':
 							continue
 
-						# options for both comments and no comments
-						if comment == None:
-							trigger = "%s" % (methodParamsStr,)
-						else:
-							trigger = "%s\t'%s" % (methodParamsStr, comment)
-
-						# replace done as '$' is a special character that seems to stop the auto-complete
-						contents = methodParamsStr.replace('$', '\\$')
+						trigger, contents = buildTriggerAndContents(comment, methodParamsStr)
 						matches.append((trigger, contents))
-
+					
 					break
 
 		# if an empty list is returned from this method then the standard sublime suggestions will be used
@@ -95,20 +95,44 @@ def extractMethods(path):
 	content = returnClassString(path)
 
 	# finds all the strings that represent functions or subs and their parameters
-	# will return a iterable collection of MatchObjects (in this case) each with 3 
-	# groups. The first will contain Sub or Function the second will be the methods
-	# name and the third will be the paramater list or None if there aren't any
-	# TODO - add bit so ignores private methods
-	matches = re.finditer('((\\s*\'.*\\n)*)\\s*(\\bPrivate\\b|\\bPublic\\b|)\\s*(\\bFunction\\b|\\bSub\\b) (' + \
-		VBSCRIPT_ALLOW_VAR_NAME_REGEX + ')(\\([a-zA-Z0-9\\,\\s]*\\))?', content, re.IGNORECASE)
+	# will return a iterable collection of MatchObjects (in this case) each with 7 
+	# groups. The first will contain the comments above the method the third the 
+	# scope of the method the forth the type of the method (e.g. Sub or Function)
+	# the sixth will be the methods name and the seventh will be the paramater list 
+	# or None if there aren't any
+	matches = re.finditer('((\\s*\'.*\\n)*)^\\s*(\\bPrivate\\b|\\bPublic\\b|)\\s*' \
+		+ '(\\bFunction\\b|\\bSub\\b|\\bProperty\\b\\s*(\\bLet\\b|\\bSet\\b|\\bGet\\b))\\s*(' \
+		+ VBSCRIPT_ALLOW_VAR_NAME_REGEX + ')\\s*(\\([a-zA-Z0-9\\,\\s]*\\))?$', content, \
+		re.IGNORECASE | re.MULTILINE)
 
 	# builds an array of the function and sub strings
 	methods = []
 	for match in matches:
-		comment, scope, methodParamsStr = formatMethodStr(match)
-		methods.append((str(comment), str(scope), str(methodParamsStr)))
+		comment, scope, methodType, methodParamsStr = formatMethodStr(match)
+		methods.append((comment, str(scope), str(methodParamsStr)))
 
 	return methods
+
+def extractProperties(path):
+	content = returnClassString(path)
+
+	# finds all the strings that represent functions or subs and their parameters
+	# will return a iterable collection of MatchObjects (in this case) each with 7 
+	# groups. The first will contain the comments above the method the third the 
+	# scope of the method the forth the type of the method (e.g. Sub or Function)
+	# the sixth will be the methods name and the seventh will be the paramater list 
+	# or None if there aren't any
+	matches = re.finditer('((\\s*\'.*\\n)*)^\\s*(\\bPrivate\\b|\\bPublic\\b)\\s*(' \
+		+ VBSCRIPT_ALLOW_VAR_NAME_REGEX + ')\\s*$', content, re.IGNORECASE | re.MULTILINE)
+
+	# builds an array of the function and sub strings
+	properties = []
+
+	for match in matches:
+		comment, scope, propertyName = formatPropertyStr(match)
+		properties.append((comment, str(scope), str(propertyName)))
+
+	return properties
 
 # returns a sub string for the file that corresponds to the the class in the library 
 # file allowing for vbScript removing line continuation characters and putting the lines 
@@ -266,28 +290,25 @@ def formatImportPath(str):
 	str = str.replace('/', '\\')	
 	return str.strip('\\')
 
+def formatPropertyStr(match):
+	COMMENT_POS = 1
+	PROPERTY_SCOPE_POS = 3
+	PROPERTY_NAME_POS = 4
+
+	comment, scope = getCommentAndScope(match, COMMENT_POS, PROPERTY_SCOPE_POS)
+	propertyName = match.group(PROPERTY_NAME_POS)
+	return comment, scope, propertyName
+
 # removes white spaces and the words Function, Sub, ByVal and ByRef from the function definition string
 def formatMethodStr(match):
-	pattern = re.compile("(\\s|\\bbyval\\b|\\bbyref\\b|\\bFunction\\b|\\bSub\\b)", re.IGNORECASE)
+	pattern = re.compile("(\\s+|\\bbyval\\b|\\bbyref\\b)", re.IGNORECASE)
 	COMMENT_POS = 1
 	METHOD_SCOPE_POS = 3
-	METHOD_TYPE = 4
-	METHOD_NAME_POS = 5
-	PARAMATERS_POS = 6
+	METHOD_TYPE_POS = 4
+	METHOD_NAME_POS = 6
+	PARAMATERS_POS = 7
 
-	# gets the comment immedietly above the method name
-	if match.group(COMMENT_POS) == None:
-		comment = ''
-	else:
-		comment = match.group(COMMENT_POS)
-
-	# gets the scope of the method
-	if match.group(METHOD_SCOPE_POS) == None:
-		scope = 'public'
-	elif match.group(METHOD_SCOPE_POS) == '':
-		scope = 'public'
-	else:
-		scope = match.group(METHOD_SCOPE_POS).lower()
+	comment, scope = getCommentAndScope(match, COMMENT_POS, METHOD_SCOPE_POS)
 
 	# case where there are no parmaters
 	if match.group(PARAMATERS_POS) == None:
@@ -300,6 +321,37 @@ def formatMethodStr(match):
 	methodParamsStr = pattern.sub('', methodParamsStr)
 
 	# allows for different formatting of subs and functions
-	if match.group(METHOD_TYPE).lower() == 'sub':
+	methodType = match.group(METHOD_TYPE_POS).lower()
+	if methodType in ('sub', 'property let', 'property set'):
 		methodParamsStr = methodParamsStr.replace('()', '').replace('(', ' ').replace(')', '')
-	return comment, scope, methodParamsStr
+	return comment, scope, methodType, methodParamsStr
+
+def getCommentAndScope(match, comment_pos, scope_pos):
+	# gets the comment immedietly above the method name
+	comment = match.group(comment_pos)
+	if comment == None:
+		comment = ''
+
+	# removes whitespace and "'" character from left of comment lines
+	comment = formatComment(comment)
+	comment = getCommentDescription(comment)
+
+	# gets the scope of the method
+	if match.group(scope_pos) == None:
+		scope = 'public'
+	elif match.group(scope_pos) == '':
+		scope = 'public'
+	else:
+		scope = match.group(scope_pos).lower()
+	return comment, scope
+
+def buildTriggerAndContents(comment, keywordStr):
+	# options for both comments and no comments
+	if comment == None:
+		trigger = "%s" % (keywordStr,)
+	else:
+		trigger = "%s\t'%s" % (keywordStr, comment)
+
+	# replace done as '$' is a special character that seems to stop the auto-complete
+	contents = keywordStr.replace('$', '\\$')
+	return trigger, contents
