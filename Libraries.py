@@ -1,5 +1,4 @@
-# TODO - currently also displays private methods of the classes
-# Assumes that the files that this is being run on contain valid VB syntax
+# sssumes that the files that this is being run on contain valid VB syntax
 
 import sublime_plugin
 import sublime
@@ -7,6 +6,7 @@ import re
 import os
 
 VBSCRIPT_ALLOW_VAR_NAME_REGEX = '\\b[a-zA-Z]{1}[a-zA-Z0-9_]{,254}\\b'
+VBSCRIPT_LIBRARY_PARENT_FOLDER = '\\testlibrary\\'
 
 class ImportedClassesMethods(sublime_plugin.EventListener):
 
@@ -22,7 +22,8 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 		imports = extractImports(filePath)
 
 		# gets the path of the current \TestLibrary\ directory
-		libraryDirPath = filePath[:filePath.lower().find('\\testlibrary\\') + 13]
+		libraryDirPath = filePath[:filePath.lower().find(VBSCRIPT_LIBRARY_PARENT_FOLDER) \
+			+ len(VBSCRIPT_LIBRARY_PARENT_FOLDER)]
 
 		# if a '.' character follows the keyword try to display the methods
 		if charFollowing == '.':
@@ -31,7 +32,8 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 				for file in files:
 					# full path of the file
 					path = os.path.join(directory, file)
-					pos = path.lower().find('\\testlibrary\\') + 13
+					pos = path.lower().find(VBSCRIPT_LIBRARY_PARENT_FOLDER) \
+						+ len(VBSCRIPT_LIBRARY_PARENT_FOLDER)
 					relativePath = path[pos:]
 					fileExtension = os.path.splitext(path)[1].lower()
 
