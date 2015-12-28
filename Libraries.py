@@ -83,11 +83,11 @@ def getViewWordBeforeCursorsWord(view):
 	# gets the start positions of the word that the cursor is currently at
 	wordStart = view.word(region).begin()
 	# get the word before the current one (possible a variable storing a library)
-	previousWordRegion = view.word( sublime.Region(wordStart, wordStart) )
+	previousWordRegion = view.word( sublime.Region(wordStart-1, wordStart-1) )
 	# gets the string for the word from its region
 	preceedingWord = view.substr( previousWordRegion ).lower()
 	# gets the character after the word
-	charFollowing = view.substr( sublime.Region(wordStart, wordStart+1) )
+	charFollowing = view.substr( sublime.Region(previousWordRegion.end(), previousWordRegion.end()+1) )
 	return preceedingWord, charFollowing
 
 # extracts the methods of a class from a library file
