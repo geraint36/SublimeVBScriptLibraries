@@ -15,6 +15,9 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 		matches = []
 
 		filePath = view.file_name()
+		# exits if not in a vbscript file
+		if not (isVbScriptFile(filePath)):
+			return []
 		# to get the preceeding word (which could be a varaible storing a library)
 		variableName, charFollowing = getViewWordBeforeCursorsWord(view)
 		# gets a dictionary of all the imports used in the currently opened file 
@@ -35,10 +38,9 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 					pos = path.lower().find(VBSCRIPT_LIBRARY_PARENT_FOLDER) \
 						+ len(VBSCRIPT_LIBRARY_PARENT_FOLDER)
 					relativePath = path[pos:]
-					fileExtension = os.path.splitext(path)[1].lower()
 
 					# ignore files that are not '.vbs' or '.qfl'
-					if (fileExtension != '.vbs') and (fileExtension != '.qfl'):
+					if not (isVbScriptFile(path)):
 						continue
 					# ignore words that are not imported libraries
 					if not (variableName in imports.keys()):
@@ -357,3 +359,6 @@ def buildTriggerAndContents(comment, keywordStr):
 	# replace done as '$' is a special character that seems to stop the auto-complete
 	contents = keywordStr.replace('$', '\\$')
 	return trigger, contents
+
+def isVbScriptFile(path):
+	return (os.path.splitext(path)[1].lower() in ('.vbs', '.qfl'))
