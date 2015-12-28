@@ -16,8 +16,7 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 
 		filePath = view.file_name()
 		# to get the preceeding word (which could be a varaible storing a library)
-		variableName = getViewGetWordBeforeCursorsOne(view)
-
+		variableName, charFollowing = getViewWordBeforeCursorsWord(view)
 		# gets a dictionary of all the imports used in the currently opened file 
 		# looks at the saved version no sublime's opened one
 		imports = extractImports(filePath)
@@ -25,61 +24,71 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 		# gets the path of the current \TestLibrary\ directory
 		libraryDirPath = filePath[:filePath.lower().find('\\testlibrary\\') + 13]
 
-		# goes through every file in the library directory
-		for directory, subdirectories, files in os.walk(libraryDirPath):
-			for file in files:
-				# full path of the file
-				path = os.path.join(directory, file)
-				pos = path.lower().find('\\testlibrary\\') + 13
-				relativePath = path[pos:]
-				fileExtension = os.path.splitext(path)[1].lower()
+		# if a '.' character follows the keyword try to display the methods
+		if charFollowing == '.':
+			# goes through every file in the library directory
+			for directory, subdirectories, files in os.walk(libraryDirPath):
+				for file in files:
+					# full path of the file
+					path = os.path.join(directory, file)
+					pos = path.lower().find('\\testlibrary\\') + 13
+					relativePath = path[pos:]
+					fileExtension = os.path.splitext(path)[1].lower()
 
-				# ignore files that are not '.vbs' or '.qfl'
-				if (fileExtension != '.vbs') and (fileExtension != '.qfl'):
-					continue
-				# ignore words that are not imported libraries
-				if not (variableName in imports.keys()):
-					continue
-				# ignore files that don't match the library that is stored in the variable
-				elif formatImportPath(imports[variableName]) != formatImportPath(relativePath):
-					continue
-
-				# extract all the methods of the library and put them into the matches array 
-				# elements of the matches array are tuples with a tiggers and the actualy contents
-				methods = extractMethods(path)
-				for method in methods:
-					comment, scope, methodParamsStr = method
-					# removes whitespace and "'" character from left of comment lines
-					comment = formatComment(comment)
-					comment = getCommentDescription(comment)
-
-					# ignores the private methods
-					if scope == 'private':
+					# ignore files that are not '.vbs' or '.qfl'
+					if (fileExtension != '.vbs') and (fileExtension != '.qfl'):
+						continue
+					# ignore words that are not imported libraries
+					if not (variableName in imports.keys()):
+						continue
+					# ignore files that don't match the library that is stored in the variable
+					elif formatImportPath(imports[variableName]) != formatImportPath(relativePath):
 						continue
 
-					# options for both comments and no comments
-					if comment == None:
-						trigger = "%s" % (methodParamsStr,)
-					else:
-						trigger = "%s\t'%s" % (methodParamsStr, comment)
+					# extract all the methods of the library and put them into the matches array 
+					# elements of the matches array are tuples with a tiggers and the actualy contents
+					methods = extractMethods(path)
+					for method in methods:
+						comment, scope, methodParamsStr = method
+						# removes whitespace and "'" character from left of comment lines
+						comment = formatComment(comment)
+						comment = getCommentDescription(comment)
 
-					# replace done as '$' is a special character that seems to stop the auto-complete
-					contents = methodParamsStr.replace('$', '\\$')
-					matches.append((trigger, contents))
+						# ignores the private methods
+						if scope == 'private':
+							continue
 
-		# could exit the function and return the matches here
+						# options for both comments and no comments
+						if comment == None:
+							trigger = "%s" % (methodParamsStr,)
+						else:
+							trigger = "%s\t'%s" % (methodParamsStr, comment)
+
+						# replace done as '$' is a special character that seems to stop the auto-complete
+						contents = methodParamsStr.replace('$', '\\$')
+						matches.append((trigger, contents))
+
+					break
+
+		# if an empty list is returned from this method then the standard sublime suggestions will be used
+		# this means that after any keyword that stores a library none of the standard suggestions will be 
+		# available but everywhere else it'll just display the standard auto-complete options
 		return matches
 
 # gets the word preceeding the word that the cursor is curently at
-def getViewGetWordBeforeCursorsOne(view):
+# returns the tuple (preceedingWord, charFollowing)
+def getViewWordBeforeCursorsWord(view):
 	# [0] is used because of the posiblility of multiple cursors
 	region = view.sel()[0]
 	# gets the start positions of the word that the cursor is currently at
 	wordStart = view.word(region).begin()
 	# get the word before the current one (possible a variable storing a library)
-	previousWordRegion = view.word(sublime.Region(wordStart-1,wordStart-1))
+	previousWordRegion = view.word( sublime.Region(wordStart, wordStart) )
 	# gets the string for the word from its region
-	return view.substr(previousWordRegion).lower()
+	preceedingWord = view.substr( previousWordRegion ).lower()
+	# gets the character after the word
+	charFollowing = view.substr( sublime.Region(wordStart, wordStart+1) )
+	return preceedingWord, charFollowing
 
 # extracts the methods of a class from a library file
 def extractMethods(path):
