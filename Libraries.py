@@ -55,17 +55,20 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 				# elements of the matches array are tuples with a tiggers and the actualy contents
 				methods = extractMethods(path)
 				for method in methods:
-					comment = formatComment(method[0])
-					scope = method[1]
-					methodParamsStr = method[2]
+					comment, scope, methodParamsStr = method
+					# removes whitespace and "'" character from left of comment lines
+					comment = formatComment(comment)
+					comment = getCommentDescription(comment)
 
+					# ignores the private methods
 					if scope == 'private':
 						continue
 
+					# options for both comments and no comments
 					if comment == None:
-						trigger = "%s\t(%s)" % (methodParamsStr, relativePath)
+						trigger = "%s" % (methodParamsStr,)
 					else:
-						trigger = "%s\t(%s)" % (methodParamsStr, relativePath)
+						trigger = "%s\t'%s" % (methodParamsStr, comment)
 
 					contents = methodParamsStr
 					matches.append((trigger, contents))
@@ -82,8 +85,8 @@ def extractMethods(path):
 	# groups. The first will contain Sub or Function the second will be the methods
 	# name and the third will be the paramater list or None if there aren't any
 	# TODO - add bit so ignores private methods
-	matches = re.finditer('((\\s*\'.*\\n)*)\\s*(\\bPrivate\\b|\\bPublic\\b|)\\s*(\\bFunction\\b|\\bSub\\b) (' + VBSCRIPT_ALLOW_VAR_NAME_REGEX \
-		+ ')(\\([a-zA-Z0-9\\,\\s]*\\))?', content, re.IGNORECASE)
+	matches = re.finditer('((\\s*\'.*\\n)*)\\s*(\\bPrivate\\b|\\bPublic\\b|)\\s*(\\bFunction\\b|\\bSub\\b) (' + \
+		VBSCRIPT_ALLOW_VAR_NAME_REGEX + ')(\\([a-zA-Z0-9\\,\\s]*\\))?', content, re.IGNORECASE)
 
 	# builds an array of the function and sub strings
 	methods = []
@@ -155,6 +158,75 @@ def returnFileString(path):
 
 			content += writeLine + '\n'
 	return content
+
+# removes newline character from comment and just returns the decription of the function
+# (for fancier comments of the form in the  /lib/Methods.qfl library)
+def getCommentDescription(inputComment):
+	if (not isinstance(inputComment, str)):
+		return None
+
+	commentLines = inputComment.split('\n')
+	output = ''
+	METHOD_DESC_KEYWORD = 'description'.lower()
+
+	# difference between re.search and re.match;
+	#    re.search - looks in whole string for first match
+	#    re.match - looks for a match that begins at the start of the string
+
+	# case for comments like thoose in the Methods.qfl library (fancier)
+	if (commentLines[0][:1] == "#") and \
+		(re.search('(\\b' + METHOD_DESC_KEYWORD + '\\b)\\s*:', inputComment, re.IGNORECASE) != None):
+
+		# boolean variable used to see if currently inside description part of the comment
+		pastDescLine = False
+		for line in commentLines:
+			keyWordMatchObj = re.match('\\b([a-z]*)\\b\\s*:', line, re.IGNORECASE)
+			# check to see if the line if of the form 'keyword :'
+			if keyWordMatchObj != None:
+				# gets the keyword from the regex match
+				keyWord = keyWordMatchObj.group(1).lower()
+				if keyWord == METHOD_DESC_KEYWORD:
+					pastDescLine = True
+					# adds a line to the output adding in a space if required (ignoring the 
+					# 'description:' part)
+					output = addLineAutoCompleteComment(output, \
+						line[len(METHOD_DESC_KEYWORD):].lstrip(' :'))
+				else:
+					# stops building the comment if the description has already been found
+					# and currently on a new keyword
+					if pastDescLine:
+						break
+			# if the line is of a normal form and currently in the description section
+			# then add that line to the comment
+			elif pastDescLine:
+				# adds a line to the output adding in a space if required
+				output = addLineAutoCompleteComment(output, line)
+	# default case
+	else:
+		for line in commentLines:
+			# adds a line to the output adding in a space if required
+			output = addLineAutoCompleteComment(output, line)
+	# returns the built comment removing any white space to the right
+	return output.rstrip()
+
+# adds a line to the output adding in a space if required (and ignoring some lines)
+def addLineAutoCompleteComment(comment, line):
+	# ignore enpty lines
+	if len(line) == 0:
+		pass
+	# ignore spacer lines of '#' characters (maybe achange so ignores lines that
+	# are made of just one character)
+	elif line.strip(" '") == '#' * len(line.strip(" '")):
+		pass
+	else:
+		# remove unwanted "'" characters from right of string (will cause occational
+		# errors where something is meant the be quoted)
+		# used as lots of people start and comments with the "'" character as opposed
+		# to just ending them with it
+		comment += line.rstrip("'")
+		if line[-1] != ' ':
+			comment += ' '
+	return comment
 
 # formats the comment returned by the regular expression
 def formatComment(inputComment):
