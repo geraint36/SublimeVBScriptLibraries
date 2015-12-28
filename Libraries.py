@@ -16,14 +16,7 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 
 		filePath = view.file_name()
 		# to get the preceeding word (which could be a varaible storing a library)
-		# [0] is used because of the posiblility of multiple cursors
-		region = view.sel()[0]
-		# gets the start positions of the word that the cursor is currently at
-		wordStart = view.word(region).begin()
-		# get the word before the current one (possible a variable storing a library)
-		previousWordRegion = view.word(sublime.Region(wordStart-1,wordStart-1))
-		# gets the string for the word from its region
-		variableName = view.substr(previousWordRegion).lower()
+		variableName = getViewGetWordBeforeCursorsOne(view)
 
 		# gets a dictionary of all the imports used in the currently opened file 
 		# looks at the saved version no sublime's opened one
@@ -70,11 +63,23 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 					else:
 						trigger = "%s\t'%s" % (methodParamsStr, comment)
 
-					contents = methodParamsStr
+					# replace done as '$' is a special character that seems to stop the auto-complete
+					contents = methodParamsStr.replace('$', '\\$')
 					matches.append((trigger, contents))
 
 		# could exit the function and return the matches here
 		return matches
+
+# gets the word preceeding the word that the cursor is curently at
+def getViewGetWordBeforeCursorsOne(view):
+	# [0] is used because of the posiblility of multiple cursors
+	region = view.sel()[0]
+	# gets the start positions of the word that the cursor is currently at
+	wordStart = view.word(region).begin()
+	# get the word before the current one (possible a variable storing a library)
+	previousWordRegion = view.word(sublime.Region(wordStart-1,wordStart-1))
+	# gets the string for the word from its region
+	return view.substr(previousWordRegion).lower()
 
 # extracts the methods of a class from a library file
 def extractMethods(path):
