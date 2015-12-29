@@ -1,4 +1,4 @@
-# sssumes that the files that this is being run on contain valid VB syntax
+# assumes that the files that this is being run on contain valid VB syntax
 
 import sublime_plugin
 import sublime
@@ -15,14 +15,12 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 		matches = []
 
 		filePath = view.file_name()
-		# exits if not in a vbscript file
-		if not (isVbScriptFile(filePath)):
-			return []
 		# to get the preceeding word (which could be a varaible storing a library)
 		variableName, charFollowing = getViewWordBeforeCursorsWord(view)
 		# gets a dictionary of all the imports used in the currently opened file 
 		# looks at the saved version no sublime's opened one
-		imports = extractImports(filePath)
+		currentViewContentStr = getViewText(view)
+		imports = extractImports(currentViewContentStr)
 
 		# gets the path of the current \TestLibrary\ directory
 		libraryDirPath = filePath[:filePath.lower().find(VBSCRIPT_LIBRARY_PARENT_FOLDER) \
@@ -38,9 +36,10 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 					pos = path.lower().find(VBSCRIPT_LIBRARY_PARENT_FOLDER) \
 						+ len(VBSCRIPT_LIBRARY_PARENT_FOLDER)
 					relativePath = path[pos:]
+					fileExtension = os.path.splitext(path)[1].lower()
 
 					# ignore files that are not '.vbs' or '.qfl'
-					if not (isVbScriptFile(path)):
+					if (fileExtension != '.vbs') and (fileExtension != '.qfl'):
 						continue
 					# ignore words that are not imported libraries
 					if not (variableName in imports.keys()):
@@ -49,7 +48,8 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 					elif formatImportPath(imports[variableName]) != formatImportPath(relativePath):
 						continue
 
-					properties = extractProperties(path)
+					importClassContentStr = returnClassString(path)
+					properties = extractProperties(importClassContentStr)
 					for prop in properties:
 						comment, scope, propertyName = prop
 						# ignores the private properties
@@ -61,7 +61,7 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 
 					# extract all the methods of the library and put them into the matches array 
 					# elements of the matches array are tuples with a tiggers and the actualy contents
-					methods = extractMethods(path)
+					methods = extractMethods(importClassContentStr)
 
 					for method in methods:
 						comment, scope, methodParamsStr = method
@@ -95,9 +95,7 @@ def getViewWordBeforeCursorsWord(view):
 	return preceedingWord, charFollowing
 
 # extracts the methods of a class from a library file
-def extractMethods(path):
-	content = returnClassString(path)
-
+def extractMethods(content):
 	# finds all the strings that represent functions or subs and their parameters
 	# will return a iterable collection of MatchObjects (in this case) each with 7 
 	# groups. The first will contain the comments above the method the third the 
@@ -117,9 +115,7 @@ def extractMethods(path):
 
 	return methods
 
-def extractProperties(path):
-	content = returnClassString(path)
-
+def extractProperties(content):
 	# finds all the strings that represent functions or subs and their parameters
 	# will return a iterable collection of MatchObjects (in this case) each with 7 
 	# groups. The first will contain the comments above the method the third the 
@@ -167,9 +163,7 @@ def returnClassString(path):
 	return content
 
 # extracts all the libraries that are imported by the specified one
-def extractImports(path):
-	content = returnFileString(path)
-
+def extractImports(content):
 	# finds all the strings that represent relative paths of the libraries that are 
 	# imported will return a iterable collection of MatchObjects (in this case) each 
 	# with 2 groups. The first will contain variable name that the class is stored in the 
@@ -199,6 +193,11 @@ def returnFileString(path):
 				continue
 
 			content += writeLine + '\n'
+	return content
+
+def getViewText(view):
+	numberOfChars = view.size()
+	content = view.substr( sublime.Region(0, numberOfChars) )
 	return content
 
 # removes newline character from comment and just returns the decription of the function
@@ -359,6 +358,3 @@ def buildTriggerAndContents(comment, keywordStr):
 	# replace done as '$' is a special character that seems to stop the auto-complete
 	contents = keywordStr.replace('$', '\\$')
 	return trigger, contents
-
-def isVbScriptFile(path):
-	return (os.path.splitext(path)[1].lower() in ('.vbs', '.qfl'))
