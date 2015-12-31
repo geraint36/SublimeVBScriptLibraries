@@ -1,0 +1,22 @@
+<snippet>
+	<content><![CDATA[
+' This library contains $2
+
+' Methods in this library
+
+' Library imports
+
+
+Public Function $1Lib()
+	Set $1Lib = New $1Cls
+End Function
+
+Class $1Cls
+	$3
+End Class
+]]></content>
+	<!-- Optional: Set a tabTrigger to define how to trigger the snippet -->
+	<tabTrigger>library</tabTrigger>
+	<!-- Optional: Set a scope to limit where the snippet will trigger -->
+	<scope>source.vbs</scope>
+</snippet>

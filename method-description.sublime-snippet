@@ -1,0 +1,13 @@
+<snippet>
+	<content><![CDATA[
+'#####################################################
+' Description: $1
+' Input: $2
+' Output: $3
+'#####################################################
+]]></content>
+	<!-- Optional: Set a tabTrigger to define how to trigger the snippet -->
+	<tabTrigger>description</tabTrigger>
+	<!-- Optional: Set a scope to limit where the snippet will trigger -->
+	<scope>source.vbs</scope>
+</snippet>
