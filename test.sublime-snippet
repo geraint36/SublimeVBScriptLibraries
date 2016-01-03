@@ -1,7 +1,7 @@
 <snippet>
 	<content><![CDATA[
 Public Function xl_$1(ByRef rdictParams, ByRef rsErrMsg)
-	Dim this : Set this = Test($2)
+	Dim this : Set this = Test("$2")
 	$3
 	this.EndTest(rdictParams)
 End Function

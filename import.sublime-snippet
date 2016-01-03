@@ -1,6 +1,6 @@
 <snippet>
 	<content><![CDATA[
-Private $1 : Set $1 =Import($2)
+Private $1 : Set $1 =Import("$2")
 ]]></content>
 	<!-- Optional: Set a tabTrigger to define how to trigger the snippet -->
 	<tabTrigger>import</tabTrigger>
