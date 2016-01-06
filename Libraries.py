@@ -4,11 +4,19 @@ import sublime_plugin
 import sublime
 import re
 import os
+import codecs
+import time
 
 VBSCRIPT_ALLOW_VAR_NAME_REGEX = '\\b[a-zA-Z]{1}[a-zA-Z0-9_]{,254}\\b'
 VBSCRIPT_LIBRARY_PARENT_FOLDER = '\\testlibrary\\'
 
+class FileNotFoundError:
+	pass
+
 class ImportedClassesMethods(sublime_plugin.EventListener):
+	def __init__(self):
+		# should be of the form {path : [file_last_updated_time, [[trigger1, contents1], ... ]], ... }
+		self.libraryMethodDetails = {}
 
 	def on_query_completions(self, view, prefix, locations):
 		words = []
@@ -18,6 +26,7 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 		# exits if not in a vbscript file
 		if not (isVbScriptFile(filePath)):
 			return []
+
 		# to get the preceeding word (which could be a varaible storing a library)
 		variableName, charFollowing = getViewWordBeforeCursorsWord(view)
 		# gets a dictionary of all the imports used in the currently opened file 
@@ -30,57 +39,81 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 			+ len(VBSCRIPT_LIBRARY_PARENT_FOLDER)]
 
 		# if a '.' character follows the keyword try to display the methods
-		if charFollowing == '.':
-			# goes through every file in the library directory
-			for directory, subdirectories, files in os.walk(libraryDirPath):
-				for file in files:
-					# full path of the file
-					path = os.path.join(directory, file)
-					pos = path.lower().find(VBSCRIPT_LIBRARY_PARENT_FOLDER) \
-						+ len(VBSCRIPT_LIBRARY_PARENT_FOLDER)
-					relativePath = path[pos:]
-					fileExtension = os.path.splitext(path)[1].lower()
+		# also ignores words that do not contain library classes
+		if charFollowing == '.' and (variableName in imports.keys()):
+			try:
+				storedLibraryPath = self.getFullLibraryPath(libraryDirPath, imports[variableName])
+				#storedLibraryPath = os.path.join(libraryDirPath, imports[variableName])
+				# checks if the library methods for the current file version have been already stored
+				if self.checkIfLibraryMethodsInfoIsStored(storedLibraryPath):
+					pass
+				# if the file exists the store the methods
+				else:
+					self.storeLibraryMethods(storedLibraryPath)
+			except FileNotFoundError:
+				return []
 
-					# ignore files that are not '.vbs' or '.qfl'
-					if not (isVbScriptFile(path)):
-						continue
-					# ignore words that are not imported libraries
-					if not (variableName in imports.keys()):
-						continue
-					# ignore files that don't match the library that is stored in the variable
-					elif formatImportPath(imports[variableName]) != formatImportPath(relativePath):
-						continue
-
-					importClassContentStr = returnClassString(path)
-					properties = extractProperties(importClassContentStr)
-					for prop in properties:
-						comment, scope, propertyName = prop
-						# ignores the private properties
-						if scope == 'private':
-							continue
-
-						trigger, contents = buildTriggerAndContents(comment, propertyName)
-						matches.append(('$%s' % trigger, contents))
-
-					# extract all the methods of the library and put them into the matches array 
-					# elements of the matches array are tuples with a tiggers and the actualy contents
-					methods = extractMethods(importClassContentStr)
-
-					for method in methods:
-						comment, scope, methodParamsStr = method
-						# ignores the private methods
-						if scope == 'private':
-							continue
-
-						trigger, contents = buildTriggerAndContents(comment, methodParamsStr)
-						matches.append((trigger, contents))
-					
-					break
+			matches = self.getStoredLibraryMethodsDetails(storedLibraryPath)
 
 		# if an empty list is returned from this method then the standard sublime suggestions will be used
 		# this means that after any keyword that stores a library none of the standard suggestions will be 
 		# available but everywhere else it'll just display the standard auto-complete options
 		return matches
+
+	def getFullLibraryPath(self, libraryDirPath, relativeFilePath):
+		basePath = os.path.join(libraryDirPath, relativeFilePath)
+		for extension in ['.vbs', '.qfl']:
+			tempPath = basePath + extension
+			if os.path.isfile(tempPath):
+				return tempPath
+
+		raise FileNotFoundError
+
+	def checkIfLibraryMethodsInfoIsStored(self, path):
+		if not (path in self.libraryMethodDetails.keys()):
+			return False
+		else:
+			if (os.path.isfile(path)):
+				# checks if the newest vesion of the library has be stored
+				return os.path.getmtime(path) == self.libraryMethodDetails[path][0]
+			else:
+				# removes key from the dictionary (as not the most uptodate version) 
+				self.libraryMethodDetails.pop(path, None)
+				return False
+
+	def storeLibraryMethods(self, path):
+		matches = []
+		importClassContentStr = returnClassString(path)
+		properties = extractProperties(importClassContentStr)
+		for prop in properties:
+			comment, scope, propertyName = prop
+			# ignores the private properties
+			if scope == 'private':
+				continue
+
+			trigger, contents = buildTriggerAndContents(comment, propertyName)
+			matches.append(('$%s' % trigger, contents))
+
+		# extract all the methods of the library and put them into the matches array 
+		# elements of the matches array are tuples with a tiggers and the actualy contents
+		methods = extractMethods(importClassContentStr)
+		for method in methods:
+			comment, scope, methodParamsStr = method
+			# ignores the private methods
+			if scope == 'private':
+				continue
+
+			trigger, contents = buildTriggerAndContents(comment, methodParamsStr)
+			matches.append((trigger, contents))
+
+		# stores the library methods in the global variable 
+		self.libraryMethodDetails[path] = [os.path.getmtime(path), matches]
+
+	def getStoredLibraryMethodsDetails(self, path):
+		return self.libraryMethodDetails[path][1]
+
+	
+
 
 # gets the word preceeding the word that the cursor is curently at
 # returns the tuple (preceedingWord, charFollowing)
@@ -143,7 +176,7 @@ def extractProperties(content):
 def returnClassString(path):
 	content = ''
 	inClass = False
-	with open(path) as f:
+	with openTryEncodings(path) as f:
 		for line in f:
 			writeLine = line.strip()
 
@@ -185,7 +218,7 @@ def extractImports(content):
 # and putting the lines on one line instead
 def returnFileString(path):
 	content = ''
-	with open(path) as f:
+	with openTryEncodings(path) as f:
 		for line in f:
 			writeLine = line.strip()
 
@@ -211,15 +244,18 @@ def getCommentDescription(inputComment):
 
 	commentLines = inputComment.split('\n')
 	output = ''
-	METHOD_DESC_KEYWORD = 'description'.lower()
+	possibleDescKeywords = ['description', 'does']
+	METHOD_DESC_KEYWORDS_REGEX = '|'.join(possibleDescKeywords).lower()
 
 	# difference between re.search and re.match;
 	#    re.search - looks in whole string for first match
 	#    re.match - looks for a match that begins at the start of the string
 
 	# case for comments like thoose in the Methods.qfl library (fancier)
-	if (commentLines[0][:1] == "#") and \
-		(re.search('(\\b' + METHOD_DESC_KEYWORD + '\\b)\\s*:', inputComment, re.IGNORECASE) != None):
+	descMatchObj = re.search('(\\b' + METHOD_DESC_KEYWORDS_REGEX + '\\b)\\s*:', inputComment, re.IGNORECASE)
+	if (commentLines[0][:1] == "#") and (descMatchObj != None):
+
+		methodDescKeyword = descMatchObj.group(1).lower()
 
 		# boolean variable used to see if currently inside description part of the comment
 		pastDescLine = False
@@ -229,12 +265,12 @@ def getCommentDescription(inputComment):
 			if keyWordMatchObj != None:
 				# gets the keyword from the regex match
 				keyWord = keyWordMatchObj.group(1).lower()
-				if keyWord == METHOD_DESC_KEYWORD:
+				if keyWord == methodDescKeyword:
 					pastDescLine = True
 					# adds a line to the output adding in a space if required (ignoring the 
 					# 'description:' part)
 					output = addLineAutoCompleteComment(output, \
-						line[len(METHOD_DESC_KEYWORD):].lstrip(' :'))
+						line[len(methodDescKeyword):].lstrip(' :'))
 				else:
 					# stops building the comment if the description has already been found
 					# and currently on a new keyword
@@ -266,6 +302,8 @@ def addLineAutoCompleteComment(comment, inputLine):
 	# ignore spacer lines of '#' characters (maybe achange so ignores lines that
 	# are made of just one character)
 	elif line == '#' * len(line):
+		pass
+	elif line == '=' * len(line):
 		pass
 	else:
 		comment += line + ' '
@@ -363,4 +401,17 @@ def buildTriggerAndContents(comment, keywordStr):
 	return trigger, contents
 
 def isVbScriptFile(path):
-	return (os.path.splitext(path)[1].lower() in ('.vbs', '.qfl')) 
+	return (os.path.splitext(path)[1].lower() in ('.vbs', '.qfl'))
+
+def openTryEncodings(path, encType='r'):
+	# can be found at 'https://docs.python.org/2.4/lib/standard-encodings.html'
+	# doesn't have correct encoding for .qfl files (must be saved again as UTF-8)
+	encodings = ['utf-8', 'utf-16', 'ascii']
+	for e in encodings:
+		try:
+			codecs.open(path, encType, e).read()
+			return codecs.open(path, encType, e)
+		except UnicodeDecodeError as e:
+			continue
+
+	raise Exception('no encoding found for the file %s' % path)
