@@ -8,8 +8,20 @@
 #import sublime
 #import re
 #import os
+#import sys
 #import codecs
 #import time
+
+# commented for now will need to add this (or something similar) when run as sublime package
+"""
+# adds the path of this module to the sys.path variable
+# this will allow custom imports to work no matter where this file is executed from
+path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if not path in sys.path:
+	sys.path.insert(1, path)
+# cleans up the path variables
+del path
+"""
 
 from VBScriptLibraryUtil import ImportDetails
 
@@ -80,3 +92,4 @@ class VBSClassDetails:
 if __name__ == '__main__':
 	a = VBSPropertyDetails('public', 'IR', 'CD235434')
 	print(a.toString())
+	print(__file__)
