@@ -25,8 +25,6 @@ del path
 
 from VBScriptLibraryUtil import ImportDetails
 
-VBSCRIPT_ALLOW_VAR_NAME_REGEX = '\\b[a-zA-Z]{1}[a-zA-Z0-9_]{,254}\\b'
-VBSCRIPT_VARIABLE_BASIC_REGEX = 'a-zA-Z0-9_'
 FILE_FOLDER_NAME_REGEX = 'a-zA-Z0-9_\\-'
 LIBRARY_PARENT_FOLDER = '\\TestLibrary\\'
 POSSIBLE_SCRIPT_PARENT_FOLDERS = ['\\TestLibrary\\', '\\RegressionControl\\']
@@ -90,6 +88,13 @@ class VBSClassDetails:
 		return (self.properties, self.methods)
 
 if __name__ == '__main__':
-	a = VBSPropertyDetails('public', 'IR', 'CD235434')
-	print(a.toString())
-	print(__file__)
+	#a = ImportDetails.VBSBlockScopeClass("private", "test")
+
+	path = 'C:\\Users\\User\\Documents\\Geraint\\Programming\\QTP\\TestLibrary\\lib\\MethodsTest.qfl'
+	import os
+	print(os.path.isfile(path))
+	print(ImportDetails.VBSBlockScopeFunction.isStart('Sub SetMnemonic2(ByVal menmonic,sdf)'))
+	b = ImportDetails.getLibraryScopesFormatted(path)
+	print('---------------')
+	for scope in b[1:]:
+		print('%s[name=%s]' % (scope.__class__.__name__, scope.name))
