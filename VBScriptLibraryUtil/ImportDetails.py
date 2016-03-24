@@ -1,9 +1,7 @@
-#import re
-import os
-import codecs
+import os, codecs, re
 #import time
 
-VBSCRIPT_VAR_NAME_PATTERN = '\\b[a-zA-Z]{1}[a-zA-Z0-9_]{,254}\\b'
+VBSCRIPT_VAR_NAME_PATTERN = '\\b[a-zA-Z]{1}[a-zA-Z0-9_]{0,254}\\b'
 
 class FileNotFoundException(Exception):
 	def __init__(self,*args,**kwargs):
@@ -17,23 +15,39 @@ class IncorrectFileExtensionException(Exception):
 	def __init__(self,*args,**kwargs):
 		Exception.__init__(self,*args,**kwargs)
 
+class VBSScope:
+	def __init__(self):
+		self.content = ''
+
+	def appendContent(text):
+		self.content += (text)
+
+class VBSGlobalScope(VBSScope):
+	def __init__(self):
+		VBSScope.__init__(self)
+
 # used for all scopes apart from the global scope
-class VBSBlockScope:
+class VBSBlockScope(VBSScope):
 	SCOPE_MODIFIERS_PATTERN = '(\\bpublic\\b|\\bprivate\\b)?'
 	startPattern = None
 	endPattern = None
 
 	def __init__(self):
-		self.content = ''
+		VBSScope.__init__(self)
 
-	def appendContent(text):
-		self.content.append(text)
+	@classmethod
+	def isStart(cls, line):
+		return (None != re.match(cls.startPattern, line))
+
+	@classmethod
+	def isEnd(cls, line):
+		return (None != re.match(cls.endPattern, line))
 
 class VBSBlockScopeClass(VBSBlockScope):
 	# setup up the regexp pattern static class variables
-	VBSBlockScope.startPattern = ( '%s\\s*\\bClass\\b\\s+%s' % \
+	VBSBlockScope.startPattern = ( '^%s\\s*\\bClass\\b\\s+%s$' % \
 		(VBSBlockScope.SCOPE_MODIFIERS_PATTERN, VBSCRIPT_VAR_NAME_PATTERN) )
-	VBSBlockScope.endPattern = ( '\\bEnd\\b\\s+\\bClass\\b' )
+	VBSBlockScope.endPattern = ( '^\\bEnd\\b\\s+\\bClass\\b$' )
 
 	def __init__(self, scope, name):
 		VBSBlockScope.__init__(self)
@@ -41,28 +55,44 @@ class VBSBlockScopeClass(VBSBlockScope):
 		self.name = name		
 
 class VBSBlockScopeMethod(VBSBlockScope):
-	PARAMS_TYPE_PATTERN = '(\\bByVal\\b|\\bByRef\\b)?'
-	METHOD_PARAMS_PATTERN = ( '(\\((\\s*(%s)?\\s*(%s)\\s*,)*)?' % \
-		(PARAMS_TYPE_PATTERN, VBSCRIPT_VAR_NAME_PATTERN) )
+	PARAMS_TYPE_PATTERN = '\\bByVal\\b|\\bByRef\\b'
+	METHOD_SINGLE_PARAM_PATTERN = ( '\\s*(%s)?\\s*(%s)\\s*' % (PARAMS_TYPE_PATTERN, VBSCRIPT_VAR_NAME_PATTERN) )
+	METHOD_PARAMS_PATTERN = ( '\\((%s,)*(%s)?\\)' % \
+		(METHOD_SINGLE_PARAM_PATTERN, METHOD_SINGLE_PARAM_PATTERN) )
 
-	def __init__(self, scope, name, params):
+	def __init__(self, blockStartLine):
 		VBSBlockScope.__init__(self)
-		self.scope = scope
-		self.name = name
-		self.params = params
+		match = re.match(self.startPattern, blockStartLine)
+
+		if match == None:
+			raise Exception()
+
+		groups = match.groupdict()
+
+		if 'scope' in groups:
+			self.scope = groups['scope']
+		else:
+			self.scope = 'Public'
+
+		self.name = groups['name']
+
+		if 'params' in groups:
+			self.params = groups['params']
+		else:
+			self.params = []
 
 	@classmethod
 	def setStartPattern(cls, blockIdentifierPattern):
-		cls.startPattern = ( '%s\\s*%s\\s+%s\\s*%s' % (VBSBlockScope.SCOPE_MODIFIERS_PATTERN, \
+		cls.startPattern = ( '^(?P<scope>%s)?\\s*(?P<name>%s)\\s+%s\\s*(?P<params>%s)?$' % (VBSBlockScope.SCOPE_MODIFIERS_PATTERN, \
 			blockIdentifierPattern, VBSCRIPT_VAR_NAME_PATTERN, VBSBlockScopeMethod.METHOD_PARAMS_PATTERN) )
 
 	@classmethod
 	def setEndPattern(cls, blockIdentifierPattern):
-		cls.endPattern = ( '\\bEnd\\b\\s+%s' % blockIdentifierPattern )
+		cls.endPattern = ( '^\\bEnd\\b\\s+%s$' % blockIdentifierPattern )
 
 class VBSBlockScopeFunction(VBSBlockScopeMethod):
-	def __init__(self, scope, name, params):
-		VBSBlockScopeMethod.__init__(self, scope, name, params)
+	def __init__(self, blockStartLine):
+		VBSBlockScopeMethod.__init__(self, blockStartLine)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -71,8 +101,8 @@ class VBSBlockScopeFunction(VBSBlockScopeMethod):
 		cls.setEndPattern("\\bFunction\\b")
 
 class VBSBlockScopeSub(VBSBlockScopeMethod):
-	def __init__(self, scope, name, params):
-		VBSBlockScopeMethod.__init__(self, scope, name, params)
+	def __init__(self, blockStartLine):
+		VBSBlockScopeMethod.__init__(self, blockStartLine)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -81,8 +111,8 @@ class VBSBlockScopeSub(VBSBlockScopeMethod):
 		cls.setEndPattern("\\bSub\\b")
 
 class VBSBlockScopePropertyGet(VBSBlockScopeMethod):
-	def __init__(self, scope, name, params):
-		VBSBlockScopeMethod.__init__(self, scope, name, params)
+	def __init__(self, blockStartLine):
+		VBSBlockScopeMethod.__init__(self, blockStartLine)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -91,8 +121,8 @@ class VBSBlockScopePropertyGet(VBSBlockScopeMethod):
 		cls.setEndPattern("\\bProperty\\b")
 
 class VBSBlockScopePropertyLet(VBSBlockScopeMethod):
-	def __init__(self, scope, name, params):
-		VBSBlockScopeMethod.__init__(self, scope, name, params)
+	def __init__(self, blockStartLine):
+		VBSBlockScopeMethod.__init__(self, blockStartLine)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -101,8 +131,8 @@ class VBSBlockScopePropertyLet(VBSBlockScopeMethod):
 		cls.setEndPattern("\\bProperty\\b")
 
 class VBSBlockScopePropertySet(VBSBlockScopeMethod):
-	def __init__(self, scope, name, params):
-		VBSBlockScopeMethod.__init__(self, scope, name, params)		
+	def __init__(self, blockStartLine):
+		VBSBlockScopeMethod.__init__(self, blockStartLine)		
 		
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -117,10 +147,22 @@ VBSBlockScopePropertyGet.setupPatterns()
 VBSBlockScopePropertyLet.setupPatterns()
 VBSBlockScopePropertySet.setupPatterns()
 
+VBSCRIPT_NON_GLOBAL_SCOPE_CLASSES = [VBSBlockScopeClass, VBSBlockScopeFunction, VBSBlockScopeSub, \
+	VBSBlockScopePropertyGet, VBSBlockScopePropertyLet, VBSBlockScopePropertySet]
+
 # returns formatted string for file with comments removed long with leading and trailing whitespaces
-def getLibraryContentsFormatted(path):
+def getLibraryScopesFormatted(path):
 	outputContents = ''
+	# holds the scope for the current line (if empty then in global scope)
+	# array used becase of possibility of methods inside a class
+	currentScopeStack =[]
+	globalScope = VBSGlobalScope()
+	scopes = [globalScope]
+
+	# builds formatted lines array
+	lines = []
 	with openTryEncodings(path) as f:
+		buildLine = ''
 		for line in f:
 			# removes comments and white spaces
 			formattedLine = removeComments(line).strip(' \t')
@@ -131,14 +173,43 @@ def getLibraryContentsFormatted(path):
 
 			# to remove line continuation
 			if (formattedLine[-1] == '_'):
-				outputContents += formattedLine
+				buildLine += formattedLine
 			else:
-				outputContents += formattedLine + '\n'
+				buildLine += '\n'
+
+				# checks if is end of current scope
+				if len(currentScopeStack) > 0:
+					if currentScopeStack[-1].isEnd(buildLine):
+						print('end of scope="%s"' % currentScopeStack[-1].__name__)
+						currentScope = currentScopeStack.pop(-1)
+						scopes.append(currentScope)
+						continue
+
+				# checks to see if is the start of a new scope
+				# returns None if is not the start of a new scope
+				newScope = getNewScope(line)
+				if newScope != None:
+					# add code to build scope class properly
+					currentScope.append(newScope)
+					continue
+
+				# adds the line to the current scope
+				if len(currentScopeStack) > 0:
+					currentScopeStack[-1].appendContent(buildLine)
+				else:
+					globalScope.appendContent(buildLine)
+				# clears the line that has been built from memory
+				buildLine = ''
 
 	return outputContents
 
-def getLibraryScopeContents(scope):
-	pass
+def getNewScope(line):
+	for scope in VBSCRIPT_NON_GLOBAL_SCOPE_CLASSES:
+		if scope.isStart(line):
+			print(scope.__name__)
+			return scope(line)
+
+	return None
 
 def removeComments(line):
 	inStr = False
