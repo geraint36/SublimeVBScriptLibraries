@@ -15,6 +15,40 @@ class IncorrectFileExtensionException(Exception):
 	def __init__(self,*args,**kwargs):
 		Exception.__init__(self,*args,**kwargs)
 
+class VBScriptElement(object):
+	def __init__(self):
+		pass
+
+class VBScriptVariable(VBScriptElement):
+	pattern = '^(?P<type>Set)?\\s*(?P<name>%s)\\s*=(?P<value>.+)$'
+
+	def __init__(self, line, comment):
+		VBScriptElement.__init__(self)
+		match = self.getMatch(line)
+
+		if (match == None):
+			raise ValueError("'Could not construct class='%s' from line='%s'" % \
+				(self.__class__.__name__, blockStartLine))
+
+		self.comment = comment
+		groups = match.groupdict()
+		self.name = groups['name']
+		self.value = groups['value']
+
+		# if 'Set' keyword is used then is a reference to a variable, otherwise is a copy of value
+		if ('type' in groups):
+			self.type = 'Reference'
+		else:
+			self.type = 'Value'
+
+	@classmethod
+	def isVar(cls, line):
+		return (None != cls.getMatch(cls, line))
+
+	@classmethod
+	def getMatch(cls, line):
+		return re.match(cls.pattern, line)
+
 class VBSScope:
 	def __init__(self):
 		self.content = ''
@@ -42,7 +76,8 @@ class VBSBlockScope(VBSScope):
 		self.match = self.matchStart(blockStartLine)
 
 		if self.match == None:
-			raise Exception()
+			raise ValueError("'Could not construct class='%s' from line='%s'" % \
+				(self.__class__.__name__, blockStartLine))
 
 		groups = self.match.groupdict()
 
@@ -185,7 +220,7 @@ def getLibraryScopesFormatted(path):
 			else:
 				buildLine += formattedLine
 				fullLine = buildLine
-				# clears variable for next line building
+				# clears variable for next line build
 				buildLine = ''
 
 				# checks if is end of current scope
