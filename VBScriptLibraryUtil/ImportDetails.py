@@ -1,7 +1,8 @@
 import os, codecs, re
 #import time
 
-VBSCRIPT_VAR_NAME_PATTERN = '\\b[a-zA-Z]{1}[a-zA-Z0-9_]{0,254}\\b'
+# \w is equivalent to [a-zA-Z0-9_] in a regex
+VBSCRIPT_VAR_NAME_PATTERN = '\\b[a-zA-Z]{1}\w{0,254}\\b'
 
 class FileNotFoundException(Exception):
 	def __init__(self,*args,**kwargs):
@@ -20,7 +21,7 @@ class VBScriptElement(object):
 		pass
 
 class VBScriptVariable(VBScriptElement):
-	pattern = '^(?P<type>Set)?\\s*(?P<name>%s)\\s*=(?P<value>.+)$'
+	pattern = ( '^(?P<type>Set )?\\s*(?P<name>%s)\\s*=(?P<value>.+)$' % VBSCRIPT_VAR_NAME_PATTERN )
 
 	def __init__(self, line, comment):
 		VBScriptElement.__init__(self)
@@ -49,28 +50,53 @@ class VBScriptVariable(VBScriptElement):
 	def getMatch(cls, line):
 		return re.match(cls.pattern, line)
 
-class VBSScope:
+class VBScriptParameter(VBScriptElement):
+	pattern = ( '^(?P<type>ByVal |ByRef )?\\s*(?P<name>%s)$' % VBSCRIPT_VAR_NAME_PATTERN)
+
+	def __init__(self, line):
+		VBScriptElement.__init__(self)
+		match = self.getMatch(line)
+
+		if (match == None):
+			raise ValueError("'Could not construct class='%s' from line='%s'" % \
+				(self.__class__.__name__, blockStartLine))
+
+		groups = match.groupdict()
+		self.name = groups['name']
+
+		# if 'Set' keyword is used then is a reference to a variable, otherwise is a copy of value
+		if ('type' in groups):
+			self.type = groups['type']
+		else:
+			self.type = 'ByRef'
+
+	@classmethod
+	def isParam(cls, line):
+		return (None != cls.getMatch(cls, line))
+
+	@classmethod
+	def getMatch(cls, line):
+		return re.match(cls.pattern, line)
+
+class VBSScriptScope(VBScriptElement):
 	def __init__(self):
-		self.content = ''
+		self.elements = []
 
-	def appendContent(self, text):
-		self.content += text
+	def addElement(self, element):
+		self.elements.append(element)
 
-	def appendContentLine(self, line):
-		self.content += line + '\n'
-
-class VBSGlobalScope(VBSScope):
+class VBScriptScopeGlobal(VBSScriptScope):
 	def __init__(self):
-		VBSScope.__init__(self)
+		VBSScriptScope.__init__(self)
 
 # inherited by all scopes apart from the global scope
-class VBSBlockScope(VBSScope):
+class VBScriptBlock(VBSScriptScope):
 	SCOPE_MODIFIERS_PATTERN = '(\\bpublic\\b|\\bprivate\\b)?'
 	startPattern = None
 	endPattern = None
 
-	def __init__(self, blockStartLine):
-		VBSScope.__init__(self)
+	def __init__(self, blockStartLine, comment):
+		VBSScriptScope.__init__(self)
 
 		# instance variable as other constructor may wish to do more with it
 		self.match = self.matchStart(blockStartLine)
@@ -79,11 +105,13 @@ class VBSBlockScope(VBSScope):
 			raise ValueError("'Could not construct class='%s' from line='%s'" % \
 				(self.__class__.__name__, blockStartLine))
 
+		self.comment = comment
 		groups = self.match.groupdict()
 
 		if 'scope' in groups:
 			self.scope = groups['scope']
 		else:
+			# default scope is Public
 			self.scope = 'Public'
 
 		self.name = groups['name']
@@ -100,23 +128,23 @@ class VBSBlockScope(VBSScope):
 	def isEnd(cls, line):
 		return (None != re.match(cls.endPattern, line, re.IGNORECASE))
 
-class VBSBlockScopeClass(VBSBlockScope):
+class VBScriptBlockClass(VBScriptBlock):
 	# setup up the regexp pattern static class variables
-	VBSBlockScope.startPattern = ( '^(?P<scope>%s)\\s*\\bClass\\b\\s+(?P<name>%s)$' % \
-		(VBSBlockScope.SCOPE_MODIFIERS_PATTERN, VBSCRIPT_VAR_NAME_PATTERN) )
-	VBSBlockScope.endPattern = ( '^\\bEnd\\b\\s+\\bClass\\b$' )
+	startPattern = ( '^(?P<scope>%s)\\s*\\bClass\\b\\s+(?P<name>%s)$' % \
+		(VBScriptBlock.SCOPE_MODIFIERS_PATTERN, VBSCRIPT_VAR_NAME_PATTERN) )
+	endPattern = ( '^\\bEnd\\b\\s+\\bClass\\b$' )
 
-	def __init__(self, blockStartLine):
-		VBSBlockScope.__init__(self, blockStartLine)
+	def __init__(self, blockStartLine, comment):
+		VBScriptBlock.__init__(self, blockStartLine, comment)
 
-class VBSBlockScopeMethod(VBSBlockScope):
+class VBScriptBlockMethod(VBScriptBlock):
 	PARAMS_TYPE_PATTERN = '\\bByVal\\b|\\bByRef\\b'
 	METHOD_SINGLE_PARAM_PATTERN = ( '\\s*(%s)?\\s*(%s)\\s*' % (PARAMS_TYPE_PATTERN, VBSCRIPT_VAR_NAME_PATTERN) )
 	METHOD_PARAMS_PATTERN = ( '\\((%s,)*(%s)?\\)' % \
 		(METHOD_SINGLE_PARAM_PATTERN, METHOD_SINGLE_PARAM_PATTERN) )
 
-	def __init__(self, blockStartLine):
-		VBSBlockScope.__init__(self, blockStartLine)
+	def __init__(self, blockStartLine, comment):
+		VBScriptBlock.__init__(self, blockStartLine, comment)
 
 		groups = self.match.groupdict()
 
@@ -128,16 +156,16 @@ class VBSBlockScopeMethod(VBSBlockScope):
 
 	@classmethod
 	def setStartPattern(cls, blockIdentifierPattern):
-		cls.startPattern = ( '^(?P<scope>%s)?\\s*%s\\s+(?P<name>%s)\\s*(?P<params>%s)?$' % (VBSBlockScope.SCOPE_MODIFIERS_PATTERN, \
-			blockIdentifierPattern, VBSCRIPT_VAR_NAME_PATTERN, VBSBlockScopeMethod.METHOD_PARAMS_PATTERN) )
+		cls.startPattern = ( '^(?P<scope>%s)?\\s*%s\\s+(?P<name>%s)\\s*(?P<params>%s)?$' % (VBScriptBlock.SCOPE_MODIFIERS_PATTERN, \
+			blockIdentifierPattern, VBSCRIPT_VAR_NAME_PATTERN, VBScriptBlockMethod.METHOD_PARAMS_PATTERN) )
 
 	@classmethod
 	def setEndPattern(cls, blockIdentifierPattern):
 		cls.endPattern = ( '^\\bEnd\\b\\s+%s$' % blockIdentifierPattern )
 
-class VBSBlockScopeFunction(VBSBlockScopeMethod):
+class VBScriptBlockFunction(VBScriptBlockMethod):
 	def __init__(self, blockStartLine):
-		VBSBlockScopeMethod.__init__(self, blockStartLine)
+		VBScriptBlockMethod.__init__(self, blockStartLine)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -145,9 +173,9 @@ class VBSBlockScopeFunction(VBSBlockScopeMethod):
 		cls.setStartPattern("\\bFunction\\b")
 		cls.setEndPattern("\\bFunction\\b")
 
-class VBSBlockScopeSub(VBSBlockScopeMethod):
+class VBScriptBlockSub(VBScriptBlockMethod):
 	def __init__(self, blockStartLine):
-		VBSBlockScopeMethod.__init__(self, blockStartLine)
+		VBScriptBlockMethod.__init__(self, blockStartLine)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -155,9 +183,9 @@ class VBSBlockScopeSub(VBSBlockScopeMethod):
 		cls.setStartPattern("\\bSub\\b")
 		cls.setEndPattern("\\bSub\\b")
 
-class VBSBlockScopePropertyGet(VBSBlockScopeMethod):
+class VBScriptBlockPropertyGet(VBScriptBlockMethod):
 	def __init__(self, blockStartLine):
-		VBSBlockScopeMethod.__init__(self, blockStartLine)
+		VBScriptBlockMethod.__init__(self, blockStartLine)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -165,9 +193,9 @@ class VBSBlockScopePropertyGet(VBSBlockScopeMethod):
 		cls.setStartPattern("\\bProperty\\b\\s+\\bGet\\b")
 		cls.setEndPattern("\\bProperty\\b")
 
-class VBSBlockScopePropertyLet(VBSBlockScopeMethod):
+class VBScriptBlockPropertyLet(VBScriptBlockMethod):
 	def __init__(self, blockStartLine):
-		VBSBlockScopeMethod.__init__(self, blockStartLine)
+		VBScriptBlockMethod.__init__(self, blockStartLine)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -175,9 +203,9 @@ class VBSBlockScopePropertyLet(VBSBlockScopeMethod):
 		cls.setStartPattern("\\bProperty\\b\\s+\\bLet\\b")
 		cls.setEndPattern("\\bProperty\\b")
 
-class VBSBlockScopePropertySet(VBSBlockScopeMethod):
+class VBScriptBlockPropertySet(VBScriptBlockMethod):
 	def __init__(self, blockStartLine):
-		VBSBlockScopeMethod.__init__(self, blockStartLine)		
+		VBScriptBlockMethod.__init__(self, blockStartLine)		
 		
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -186,14 +214,14 @@ class VBSBlockScopePropertySet(VBSBlockScopeMethod):
 		cls.setEndPattern("\\bProperty\\b")
 
 # sets up the classes start and end patterns for the different method classes
-VBSBlockScopeFunction.setupPatterns()
-VBSBlockScopeSub.setupPatterns()
-VBSBlockScopePropertyGet.setupPatterns()
-VBSBlockScopePropertyLet.setupPatterns()
-VBSBlockScopePropertySet.setupPatterns()
+VBScriptBlockFunction.setupPatterns()
+VBScriptBlockSub.setupPatterns()
+VBScriptBlockPropertyGet.setupPatterns()
+VBScriptBlockPropertyLet.setupPatterns()
+VBScriptBlockPropertySet.setupPatterns()
 
-VBSCRIPT_NON_GLOBAL_SCOPE_CLASSES = [VBSBlockScopeClass, VBSBlockScopeFunction, VBSBlockScopeSub, \
-	VBSBlockScopePropertyGet, VBSBlockScopePropertyLet, VBSBlockScopePropertySet]
+VBSCRIPT_NON_GLOBAL_SCOPE_CLASSES = [VBScriptBlockClass, VBScriptBlockFunction, VBScriptBlockSub, \
+	VBScriptBlockPropertyGet, VBScriptBlockPropertyLet, VBScriptBlockPropertySet]
 
 # returns formatted string for file with comments removed long with leading and trailing whitespaces
 def getLibraryScopesFormatted(path):
