@@ -62,7 +62,7 @@ class VBScriptParameter(VBScriptElement):
 
 		if (match == None):
 			raise ValueError("'Could not construct class='%s' from line='%s'" % \
-				(self.__class__.__name__, blockStartLine))
+				(self.__class__.__name__, line))
 
 		groups = match.groupdict()
 		self.name = groups['name']
@@ -191,9 +191,23 @@ class VBScriptBlockMethod(VBScriptBlock):
 
 		if 'params' in groups:
 			# TODO add code to parse the parameters
-			self.params = groups['params']
+			self.params = self.getParams( groups['params'] )
 		else:
 			self.params = []
+
+	def getParams(self, paramsStr):
+		if paramsStr == None:
+			return []
+		paramsStr = paramsStr.strip('()')
+		if len(paramsStr) == 0:
+			return []
+
+		paramsList = paramsStr.split(',')
+		params = []
+		for text in paramsList:
+			param = VBScriptParameter(text)
+			params.append(param)
+		return params
 
 	@classmethod
 	def setStartPattern(cls, blockIdentifierPattern):
@@ -297,8 +311,6 @@ def parseVbScriptLibrary(path):
 			oldScope = currentScopeStack.pop(-1)
 			scopes.append(oldScope)
 			continue
-		elif (line.lower().find('end') >= 0):
-			print(line)
 
 		if None != newScope:
 			currentScopeStack.append(newScope)
@@ -318,8 +330,7 @@ def getVBScriptLines(path):
 			codeLines, comment = seperateLineIntoCodeAndComment(line)
 			
 			if comment != None:
-				# .strip() with no args remove all whitespaces including tabs newlines etc. (line .strip(' \t\n\r'))
-				lines.append(comment.strip())
+				lines.append(comment)
 
 			for code in codeLines:
 				if (lastCodeLinePos != None) and (len(lines[lastCodeLinePos]) > 0) and (lines[lastCodeLinePos][-1] == '_'):
@@ -327,8 +338,7 @@ def getVBScriptLines(path):
 					lines[lastCodeLinePos] = lines[lastCodeLinePos][:-1] + code.strip(' \t')
 					continue
 
-				# .strip() with no args remove all whitespaces including tabs newlines etc. (line .strip(' \t\n\r'))
-				lines.append(code.strip())
+				lines.append(code)
 				lastCodeLinePos = len(lines) - 1
 
 	return lines
@@ -349,7 +359,7 @@ def seperateLineIntoCodeAndComment(line):
 	if (len(line) == pos):
 		comment = None
 	else:
-		comment = line[pos-1:]
+		comment = line[pos:].strip()
 	return codeLines, comment
 
 def splitMultiLineCode(line):
@@ -362,12 +372,14 @@ def splitMultiLineCode(line):
 			inStr = not inStr
 		# exit loop when comment starts
 		elif (not inStr) and (char == ":"):
-			lines.append(line[lastPos:pos])
+			lines.append(line[lastPos:pos].strip())
 			lastPos = pos + 1
 
 		pos += 1
 
-	lines.append(line[lastPos:])
+	# incase of empty line
+	if len(line) > lastPos:
+		lines.append(line[lastPos:].strip())
 	return lines
 
 def isVbScriptFile(path):
