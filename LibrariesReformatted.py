@@ -4,8 +4,8 @@
 # WARNINGS: 
 # - possible errors if functions are commented out (generally not allowed for comments)
 
-#import sublime_plugin
-#import sublime
+import sublime_plugin
+import sublime
 #import re
 #import os
 #import sys
@@ -24,77 +24,96 @@ del path
 """
 
 from VBScriptLibraryUtil import ImportDetails
+print(dir(ImportDetails))
+#from VBScriptLibraryUtil.ImportDetails import VBScriptBlockSub
+print(ImportDetails.isVBScriptFile("asd"))
+
 
 FILE_FOLDER_NAME_REGEX = 'a-zA-Z0-9_\\-'
 LIBRARY_PARENT_FOLDER = '\\TestLibrary\\'
 POSSIBLE_SCRIPT_PARENT_FOLDERS = ['\\TestLibrary\\', '\\RegressionControl\\']
 
-class VBSParameterDetails:
-	def __init__(self, paramType, name):
-		# 'ByVal' or 'ByRef'
-		self.paramType = paramType
-		self.name = name
 
-	# just for testing
-	def toString(self):
-		return (self.paramType, self.name)
+class ImportedClassesMethods(sublime_plugin.EventListener):
+	# should be of the form {path:LibraryDetailsClassInstance, ... }
+	libraryDetails = {}
+	def __init__(self):
+		pass
 
-class VBSVariableDetails:
-	def __init__(self, name, value):
-		self.name = name
-		# what the variable contains
-		# only used if it is an object and has other details inside it like class with methods etc.
-		# set to None otherwise
-		self.value = value
+	# the return value of this function is what will appear in the auto complete (unless is is an empty list
+	# in which case the standard autocompletions options will  be used)
+	def on_query_completions(self, view, prefix, locations):
+		words = []
+		matches = []
 
-	# just for testing
-	def toString(self):
-		return (self.name, self.value)
+		filePath = view.file_name()
+		# exits if not in a vbscript file
+		if not (ImportDetails.isVBScriptFile(filePath)):
+			return []
 
-class VBSPropertyDetails(VBSVariableDetails):
-	def __init__(self, scope, name, value):
-		# probably should use .super() but differece between Python 2 and 3 plus don't really know how it works
-		VBSVariableDetails.__init__(self, name, value)
-		# 'Private' or 'Public'
-		self.scope = scope
+		# to get the preceeding word (which could be a varaible storing a library)
+		print(words)
+		words = getVariableTreeBeforeCursor(view)
+		print(words)
 
-	# just for testing
-	def toString(self):
-		return (self.scope,) + VBSVariableDetails.toString(self)
 
-class VBSMethodDetails:
-	def __init__(self, scope, methType, name, params):
-		# 'Private' or 'Public'
-		self.scope = scope
-		# 'Function', 'Sub', 'Property Let' or 'Property Set'
-		self.methType = methType
-		self.name = name
-		# a list of VBSParameterDetails classes
-		self.params = params
+		# TODO - from here on finish code
+		d = ImportDetails.LibraryDetailsCache.getDetails(filePath)
+		print(d)
+		
 
-	# just for testing
-	def toString(self):
-		return (self.scope, self.methType, self.name, self.params)
+		# gets a dictionary of all the imports used in the currently opened file 
+		# looks at the saved version no sublime's opened one
+		currentViewContentStr = getViewText(view)
 
-class VBSClassDetails:
-	def __init__(self, properties, methods):
-		# a list of VBSPropertyDetails classes
-		self.properties = properties
-		# a list of VBSMethodDetails classes
-		self.methods = methods
+		# if an empty list is returned from this method then the standard sublime suggestions will be used
+		# this means that after any keyword that stores a library none of the standard suggestions will be 
+		# available but everywhere else it'll just display the standard auto-complete options
+		return matches
 
-	# just for testing
-	def toString(self):
-		return (self.properties, self.methods)
+# gets the word preceeding the word that the cursor is curently at
+def getVariableTreeBeforeCursor(view):
+	# [0] is used because of the posiblility of multiple cursors
+	region = view.sel()[0]
+	# gets the start positions of the word that the cursor is currently at
+	wordStart = view.word(region).begin()
+
+	return getVariableTree(view, wordStart-1)
+
+def getVariableTree(view, pos, inputWords=None):
+	if None == inputWords:
+		words = []
+	else:
+		# clones the list
+		words = list(inputWords)
+
+	# get the word region before the inputted position
+	wordRegion = view.word( sublime.Region(pos, pos) )
+	
+	# gets the character before the word
+	charBefore = view.substr( sublime.Region(wordRegion.begin()-1, wordRegion.begin()) )
+	# gets the character after the word
+	charAfter = view.substr( sublime.Region(wordRegion.end(), wordRegion.end()+1) )
+
+	if charAfter != '.':
+		return []
+
+	# adds the string for the word from the region
+	words.insert(0, view.substr(wordRegion))
+
+	if charBefore == '.':
+		words = getVariableTree(view, wordRegion.begin()-1, words)
+
+	return words
 
 if __name__ == '__main__':
 	#a = ImportDetails.VBSBlockScopeClass("private", "test")
+	a = ImportDetails.LibraryDetailsCache
 
 	path = 'C:\\Users\\User\\Documents\\Geraint\\Programming\\QTP\\TestLibrary\\lib\\MethodsTest.qfl'
 	import os
 	print(os.path.isfile(path))
-	print(ImportDetails.VBSBlockScopeFunction.isStart('Sub SetMnemonic2(ByVal menmonic,sdf)'))
-	b = ImportDetails.getLibraryScopesFormatted(path)
+	b = ImportDetails.parseVBScriptLibrary(path)
 	print('---------------')
-	for scope in b[1:]:
-		print('%s[name=%s]' % (scope.__class__.__name__, scope.name))
+	for scope in b:
+		print('name=%s subblocks=%r variables=%r' % (scope.__class__.__name__, scope.blocks, scope.variables) )

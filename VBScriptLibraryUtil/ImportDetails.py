@@ -32,7 +32,7 @@ class VBScriptVariable(VBScriptElement):
 
 		if (match == None):
 			raise ValueError("'Could not construct class='%s' from line='%s'" % \
-				(self.__class__.__name__, blockStartLine))
+				(self.__class__.__name__, line))
 
 		self.comment = comment
 		groups = match.groupdict()
@@ -52,6 +52,9 @@ class VBScriptVariable(VBScriptElement):
 	@classmethod
 	def getMatch(cls, line):
 		return re.match(cls.pattern, line)
+
+	def getName(self):
+		return self.name
 
 class VBScriptParameter(VBScriptElement):
 	pattern = ( '^(?P<type>ByVal |ByRef )?\\s*(?P<name>%s)$' % VBSCRIPT_VAR_NAME_PATTERN)
@@ -81,18 +84,33 @@ class VBScriptParameter(VBScriptElement):
 	def getMatch(cls, line):
 		return re.match(cls.pattern, line)
 
-class VBSScriptScope(VBScriptElement):
+class VBScriptScope(VBScriptElement):
 	def __init__(self):
 		self.scopeRange = None
-		self.variables = []
-		self.blocks = []
+		# of the form {name:varClassInstance, ...}
+		self.variables = {}
+		# of the form {identifier:scriptBlockClassInstance, ...}
+		self.blocks = {}
 		self.ended = False
 
 	def addVariable(self, var):
-		self.variables.append(var)
+		name = var.getName().lower()
+		# overwrites previous keys if they exist
+		self.variables[name] = var
 
 	def addSubBlock(self, block):
-		self.blocks.append(block)
+		name = block.getStrIdentifier().lower()
+		# raises error if the key already exists
+		if (name in self.blocks):
+			raise ValueError('Method already found with the name=%s' % name)
+		else:
+			self.blocks[name] = block
+
+	def getVariables(self):
+		return self.variables.values()
+
+	def getSubBlocks(self):
+		return self.blocks.values()
 
 	@classmethod
 	def getNewScope(cls, line, comment, lineNo):
@@ -114,7 +132,7 @@ class VBSScriptScope(VBScriptElement):
 			return None
 
 		# see if is the start of a new scope
-		newScope = VBSScriptScope.getNewScope(line, comment, lineNo)
+		newScope = VBScriptScope.getNewScope(line, comment, lineNo)
 		if None != newScope:
 			self.addSubBlock(newScope)
 			return newScope
@@ -132,9 +150,9 @@ class VBSScriptScope(VBScriptElement):
 	def isEnd(cls, line):
 		raise NotImplementedError(".isEnd() method not implemented by class='%s'" % cls.__name__)
 
-class VBScriptScopeGlobal(VBSScriptScope):
+class VBScriptScopeGlobal(VBScriptScope):
 	def __init__(self):
-		VBSScriptScope.__init__(self)
+		VBScriptScope.__init__(self)
 
 	@classmethod
 	def isEnd(cls, line):
@@ -142,13 +160,13 @@ class VBScriptScopeGlobal(VBSScriptScope):
 		return False
 
 # inherited by all scopes apart from the global scope
-class VBScriptBlock(VBSScriptScope):
+class VBScriptBlock(VBScriptScope):
 	SCOPE_MODIFIERS_PATTERN = '(\\bpublic\\b|\\bprivate\\b)?'
 	startPattern = None
 	endPattern = None
 
 	def __init__(self, blockStartLine, comment, lineNo):
-		VBSScriptScope.__init__(self)
+		VBScriptScope.__init__(self)
 
 		# instance variable as other constructor may wish to do more with it
 		self.match = self.matchStart(blockStartLine)
@@ -180,6 +198,12 @@ class VBScriptBlock(VBSScriptScope):
 	@classmethod
 	def isEnd(cls, line):
 		return (None != re.match(cls.endPattern, line, re.IGNORECASE))
+
+	def getName(self):
+		return self.name
+
+	def getStrIdentifier(self):
+		return ( '%s %s' % (self.__class__.__name__, self.name) )
 
 class VBScriptBlockClass(VBScriptBlock):
 	# setup up the regexp pattern static class variables
@@ -290,8 +314,74 @@ VBScriptBlockPropertySet.setupPatterns()
 VBSCRIPT_NON_GLOBAL_SCOPE_CLASSES = [VBScriptBlockClass, VBScriptBlockFunction, VBScriptBlockSub, \
 	VBScriptBlockPropertyGet, VBScriptBlockPropertyLet, VBScriptBlockPropertySet]
 
+# classes used to store and extract library details
+class LibraryDetails(object):
+	def __init__(self, path, useRelativePath=False):
+		if useRelativePath:
+			path = LibraryDetailsCache.getLibraryPath(path)
+
+		self.path = path
+		self.file_last_modified = os.path.getmtime(path)
+		self.contents = parseVBScriptLibrary(path)
+
+	def getLastModified(self):
+		return self.file_last_modified
+
+	def getContents(self):
+		return self.contents
+
+class LibraryDetailsCache(object):
+	LIBRARY_PARENT_FOLDER = '\\TestLibrary\\'
+	POSSIBLE_SCRIPT_PARENT_FOLDERS = ['\\TestLibrary\\', '\\RegressionControl\\']
+	librariesDirPath = None
+	libraries = {}
+
+	def __init__(self):
+		pass
+
+	@classmethod
+	def formatPath(cls, path):
+		return path.lower()
+
+	@classmethod
+	def getDetails(cls, path):
+		path = cls.formatPath(path)
+		# see if library is already stored
+		if (path in cls.libraries):
+			libDetails = cls.libraries[path]
+			# if the file has not been modified return it's details
+			if (libDetails.getLastModified() == os.path.getmtime(path)):
+				return libDetails.getContents()
+
+		# if not added or outdated version extract details then return them
+		cls.addLibrary(path)
+		return cls.libraries[path].getContents()
+
+	@classmethod
+	def addLibrary(cls, path):
+		path = cls.formatPath(path)
+		cls.libraries[path] = LibraryDetails(path)
+
+	@classmethod
+	def getLibraryPath(cls, relativePath):
+		return os.path.join( cls.librariesDirPath, relativePath )
+
+	# needs to be called at least once before the class is used (call each time you need to 
+	# the libraries folder path)
+	@classmethod
+	def findAndSetLibrariesFolderPath(cls, filePath):
+		for parentDir in POSSIBLE_SCRIPT_PARENT_FOLDERS:
+			pos = filePath.lower().find( parentDir.lower() )
+
+			if pos >=0:
+				# stores the direcory path
+				cls.librariesDirPath = os.path.join( filePath[:pos], LIBRARY_PARENT_FOLDER )
+
+		raise ValueError("Could not find the script in one of the parent folders \
+			POSSIBLE_SCRIPT_PARENT_FOLDERS=%r" % POSSIBLE_SCRIPT_PARENT_FOLDERS)
+
 # returns formatted string for file with comments removed long with leading and trailing whitespaces
-def parseVbScriptLibrary(path):
+def parseVBScriptLibrary(path):
 	outputContents = ''
 	# holds the scope for the current line (if empty then in global scope)
 	# array used becase of possibility of methods inside a class	
@@ -329,7 +419,7 @@ def parseVbScriptLibrary(path):
 
 	# raises error if a non-global block has not been closed
 	if len(currentScopeStack) > 1:
-		raise ValueError('Unclosed VbScript blocks=%r' % currentScopeStack[1:])
+		raise ValueError('Unclosed VBScript blocks=%r' % currentScopeStack[1:])
 
 	return scopes
 
@@ -351,6 +441,8 @@ def getVBScriptLines(path):
 					lines[lastCodeLinePos] = lines[lastCodeLinePos][:-1] + code.strip(' \t')
 					continue
 
+				# if code line is split over multiple will line number of the last one
+				# this will help with the ranges for the scopes (used inside the VBScriptScope.parseLine() method)
 				lines.append([code, pos])
 				lastCodeLinePos = len(lines) - 1
 			pos += 1
@@ -396,7 +488,7 @@ def splitMultiLineCode(line):
 		lines.append(line[lastPos:].strip())
 	return lines
 
-def isVbScriptFile(path):
+def isVBScriptFile(path):
 	return (os.path.splitext(path)[1].lower() in ('.vbs', '.qfl'))
 
 def openTryEncodings(path, encType='r'):
