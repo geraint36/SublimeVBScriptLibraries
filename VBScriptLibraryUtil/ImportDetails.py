@@ -265,7 +265,7 @@ VBSCRIPT_NON_GLOBAL_SCOPE_CLASSES = [VBScriptBlockClass, VBScriptBlockFunction, 
 	VBScriptBlockPropertyGet, VBScriptBlockPropertyLet, VBScriptBlockPropertySet]
 
 # returns formatted string for file with comments removed long with leading and trailing whitespaces
-def getLibraryScopesFormatted(path):
+def parseVbScriptLibrary(path):
 	outputContents = ''
 	# holds the scope for the current line (if empty then in global scope)
 	# array used becase of possibility of methods inside a class	
