@@ -83,35 +83,46 @@ class VBScriptParameter(VBScriptElement):
 
 class VBSScriptScope(VBScriptElement):
 	def __init__(self):
-		self.elements = []
+		self.scopeRange = None
+		self.variables = []
+		self.blocks = []
 		self.ended = False
 
-	def addElement(self, element):
-		self.elements.append(element)
+	def addVariable(self, var):
+		self.variables.append(var)
+
+	def addSubBlock(self, block):
+		self.blocks.append(block)
 
 	@classmethod
-	def getNewScope(cls, line, comment):
+	def getNewScope(cls, line, comment, lineNo):
 		for scope in VBSCRIPT_NON_GLOBAL_SCOPE_CLASSES:
 			if scope.isStart(line):
-				return scope(line, comment)
+				return scope(line, comment, lineNo)
 
 		return None
 
-	def parseLine(self, line, comment):
+	def hasEnded(self):
+		return (None != self.scopeRange)
+
+	def scopeRange(self):
+		return self.scopeRange
+
+	def parseLine(self, line, comment, lineNo):
 		if self.isEnd(line):
-			self.ended = True
+			self.scopeRange = range(self.startLineNumber + 1, lineNo)
 			return None
 
 		# see if is the start of a new scope
-		newScope = VBSScriptScope.getNewScope(line, comment)
+		newScope = VBSScriptScope.getNewScope(line, comment, lineNo)
 		if None != newScope:
-			self.addElement(newScope)
+			self.addSubBlock(newScope)
 			return newScope
 
 		# see if line is a variable
 		if VBScriptVariable.isVar(line):
 			var = VBScriptVariable(line, comment)
-			self.addElement(var)
+			self.addVariable(var)
 			return None
 		
 		# other cases
@@ -136,7 +147,7 @@ class VBScriptBlock(VBSScriptScope):
 	startPattern = None
 	endPattern = None
 
-	def __init__(self, blockStartLine, comment):
+	def __init__(self, blockStartLine, comment, lineNo):
 		VBSScriptScope.__init__(self)
 
 		# instance variable as other constructor may wish to do more with it
@@ -146,6 +157,7 @@ class VBScriptBlock(VBSScriptScope):
 			raise ValueError("'Could not construct class='%s' from line='%s'" % \
 				(self.__class__.__name__, blockStartLine))
 
+		self.startLineNumber = lineNo
 		self.comment = comment
 		groups = self.match.groupdict()
 
@@ -175,8 +187,8 @@ class VBScriptBlockClass(VBScriptBlock):
 		(VBScriptBlock.SCOPE_MODIFIERS_PATTERN, VBSCRIPT_VAR_NAME_PATTERN) )
 	endPattern = ( '^\\bEnd\\b\\s+\\bClass\\b$' )
 
-	def __init__(self, blockStartLine, comment):
-		VBScriptBlock.__init__(self, blockStartLine, comment)
+	def __init__(self, blockStartLine, comment, lineNo):
+		VBScriptBlock.__init__(self, blockStartLine, comment, lineNo)
 
 class VBScriptBlockMethod(VBScriptBlock):
 	PARAMS_TYPE_PATTERN = '\\bByVal\\b|\\bByRef\\b'
@@ -184,8 +196,8 @@ class VBScriptBlockMethod(VBScriptBlock):
 	METHOD_PARAMS_PATTERN = ( '\\((%s,)*(%s)?\\)' % \
 		(METHOD_SINGLE_PARAM_PATTERN, METHOD_SINGLE_PARAM_PATTERN) )
 
-	def __init__(self, blockStartLine, comment):
-		VBScriptBlock.__init__(self, blockStartLine, comment)
+	def __init__(self, blockStartLine, comment, lineNo):
+		VBScriptBlock.__init__(self, blockStartLine, comment, lineNo)
 
 		groups = self.match.groupdict()
 
@@ -219,8 +231,8 @@ class VBScriptBlockMethod(VBScriptBlock):
 		cls.endPattern = ( '^\\bEnd\\b\\s+%s$' % blockIdentifierPattern )
 
 class VBScriptBlockFunction(VBScriptBlockMethod):
-	def __init__(self, blockStartLine, comment):
-		VBScriptBlockMethod.__init__(self, blockStartLine, comment)
+	def __init__(self, blockStartLine, comment, lineNo):
+		VBScriptBlockMethod.__init__(self, blockStartLine, comment, lineNo)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -229,8 +241,8 @@ class VBScriptBlockFunction(VBScriptBlockMethod):
 		cls.setEndPattern("\\bFunction\\b")
 
 class VBScriptBlockSub(VBScriptBlockMethod):
-	def __init__(self, blockStartLine, comment):
-		VBScriptBlockMethod.__init__(self, blockStartLine, comment)
+	def __init__(self, blockStartLine, comment, lineNo):
+		VBScriptBlockMethod.__init__(self, blockStartLine, comment, lineNo)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -239,8 +251,8 @@ class VBScriptBlockSub(VBScriptBlockMethod):
 		cls.setEndPattern("\\bSub\\b")
 
 class VBScriptBlockPropertyGet(VBScriptBlockMethod):
-	def __init__(self, blockStartLine, comment):
-		VBScriptBlockMethod.__init__(self, blockStartLine, comment)
+	def __init__(self, blockStartLine, comment, lineNo):
+		VBScriptBlockMethod.__init__(self, blockStartLine, comment, lineNo)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -249,8 +261,8 @@ class VBScriptBlockPropertyGet(VBScriptBlockMethod):
 		cls.setEndPattern("\\bProperty\\b")
 
 class VBScriptBlockPropertyLet(VBScriptBlockMethod):
-	def __init__(self, blockStartLine, comment):
-		VBScriptBlockMethod.__init__(self, blockStartLine, comment)
+	def __init__(self, blockStartLine, comment, lineNo):
+		VBScriptBlockMethod.__init__(self, blockStartLine, comment, lineNo)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -259,8 +271,8 @@ class VBScriptBlockPropertyLet(VBScriptBlockMethod):
 		cls.setEndPattern("\\bProperty\\b")
 
 class VBScriptBlockPropertySet(VBScriptBlockMethod):
-	def __init__(self, blockStartLine, comment):
-		VBScriptBlockMethod.__init__(self, blockStartLine, comment)		
+	def __init__(self, blockStartLine, comment, lineNo):
+		VBScriptBlockMethod.__init__(self, blockStartLine, comment, lineNo)		
 		
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -290,7 +302,7 @@ def parseVbScriptLibrary(path):
 	lines = getVBScriptLines(path)
 	comment = None
 
-	for line in lines:
+	for line, pos in lines:
 		if len(line) == 0:
 			# clear comment
 			comment = None
@@ -304,10 +316,10 @@ def parseVbScriptLibrary(path):
 				comment += '\n' + line[1:]
 
 		currentScope = currentScopeStack[-1]
-		newScope = currentScope.parseLine(line, comment)
+		newScope = currentScope.parseLine(line, comment, pos)
 
 		# if end of current scope
-		if currentScope.ended:
+		if currentScope.hasEnded():
 			oldScope = currentScopeStack.pop(-1)
 			scopes.append(oldScope)
 			continue
@@ -322,15 +334,16 @@ def parseVbScriptLibrary(path):
 	return scopes
 
 def getVBScriptLines(path):
+	# list of the from [[line, pos], ...]
 	lines = []
+	pos = 0
 	lastCodeLinePos = None
 	with openTryEncodings(path) as f:
-		buildLine = ''
 		for line in f:
 			codeLines, comment = seperateLineIntoCodeAndComment(line)
 			
 			if comment != None:
-				lines.append(comment)
+				lines.append([comment, pos])
 
 			for code in codeLines:
 				if (lastCodeLinePos != None) and (len(lines[lastCodeLinePos]) > 0) and (lines[lastCodeLinePos][-1] == '_'):
@@ -338,8 +351,9 @@ def getVBScriptLines(path):
 					lines[lastCodeLinePos] = lines[lastCodeLinePos][:-1] + code.strip(' \t')
 					continue
 
-				lines.append(code)
+				lines.append([code, pos])
 				lastCodeLinePos = len(lines) - 1
+			pos += 1
 
 	return lines
 
