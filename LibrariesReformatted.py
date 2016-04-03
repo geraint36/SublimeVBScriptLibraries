@@ -29,6 +29,11 @@ FILE_FOLDER_NAME_REGEX = 'a-zA-Z0-9_\\-'
 LIBRARY_PARENT_FOLDER = '\\TestLibrary\\'
 POSSIBLE_SCRIPT_PARENT_FOLDERS = ['\\TestLibrary\\', '\\RegressionControl\\']
 
+def printScope(scope):
+	print('------------------------')
+	print(scope.variables.keys())
+	print('------------------------')
+	print(scope.blocks.keys())
 
 class ImportedClassesMethods(sublime_plugin.EventListener):
 	# should be of the form {path:LibraryDetailsClassInstance, ... }
@@ -55,10 +60,18 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 
 		#print(libDetails[0])
 		#print(libDetails[0].getVariable('aman').valueStr)
+		
+		print('fnc1 - %s' % libDetails[0].getSubBlock("fnc1").getScopeRange())
 		print('fnc1 - %s' % libDetails[0].getSubBlock("fnc1").getValue())
 		print('aman - %s' % libDetails[0].getVariable('aman').getValue())
 		print('user - %s' % libDetails[0].getVariable('user').getValue())
+		
 
+		#printScope(libDetails[0])
+		#printScope(libDetails[0].getLineCombinedScope(15))
+		a = libDetails[0].getLineCombinedScope(15)
+		print('DONE')
+		printScope(a)
 		# if an empty list is returned from this method then the standard sublime suggestions will be used
 		# this means that after any keyword that stores a library none of the standard suggestions will be 
 		# available but everywhere else it'll just display the standard auto-complete options
