@@ -1,6 +1,11 @@
 import os, codecs, re
 #import time
 
+""" TODO
+ - get so can deal will expressions of the for (new mycls).getAnotherCls(param1, "sd", 4).variables
+ - differentiate between method and class blocks (instead of getSubBlock() method replace with getMethod() and getClass())
+"""
+
 # \w is equivalent to [a-zA-Z0-9_] in a regex
 VBSCRIPT_VAR_NAME_PATTERN = '\\b[a-zA-Z]{1}\\w{0,254}\\b'
 
@@ -35,9 +40,7 @@ class VBScriptCanReturnValue(object):
 			return self.returnValue
 		self.alreadyAskedForValue = True
 
-		# TODO - finish will work with methods return values too
 		outputValue = self.getContents()
-		# TODO - make seperate class for things with return values and make variable, function and property get extend it too
 		prevVals = []
 		while issubclass( outputValue.__class__, VBScriptCanReturnValue ):
 			prevVals.append(outputValue)
