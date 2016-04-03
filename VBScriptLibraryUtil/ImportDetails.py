@@ -25,13 +25,29 @@ class VBScriptElement(object):
 
 # extended bt VBScriptVariable, VBScriptBlockFunction and VBScriptBlockPropertyGet
 class VBScriptCanReturnValue(object):
+	def __init__(self):
+		self.alreadyAskedForValue = False
+		self.returnValue = None
+
 	def getValue(self):
+		# caching of value
+		if self.alreadyAskedForValue:
+			return self.returnValue
+		self.alreadyAskedForValue = True
+
 		# TODO - finish will work with methods return values too
 		outputValue = self.getContents()
 		# TODO - make seperate class for things with return values and make variable, function and property get extend it too
+		prevVals = []
 		while issubclass( outputValue.__class__, VBScriptCanReturnValue ):
+			prevVals.append(outputValue)
 			outputValue = outputValue.getContents()
 
+			# to prevent infinite recursion which can occure for example when a=b and b=a
+			if (outputValue in prevVals):
+				return None
+
+		self.returnValue = outputValue
 		return outputValue
 
 	def getContents(self):
@@ -46,6 +62,7 @@ class VBScriptVariable(VBScriptElement, VBScriptCanReturnValue):
 
 	def __init__(self, line, lineNo, comment, globalScope):
 		VBScriptElement.__init__(self)
+		VBScriptCanReturnValue.__init__(self)
 		match = self.getMatch(line)
 
 		if (match == None):
@@ -71,13 +88,14 @@ class VBScriptVariable(VBScriptElement, VBScriptCanReturnValue):
 
 	def getContents(self):
 		if not self.contentsCalculated:
+			self.contentsCalculated = True
 			print('before=%s' % self.value)
 			currentScope = self.globalScopeRef.getLineCombinedScope(self.lineNo)
 			self.parseValue(currentScope)
-			self.contentsCalculated = True
+			
 			print('after=%s' % self.value)
 
- 		return self.value
+		return self.value
 
 	@classmethod
 	def isVar(cls, line):
@@ -178,9 +196,6 @@ class VBScriptVariable(VBScriptElement, VBScriptCanReturnValue):
 	def parseValue(self, scope):
 		self.value = self.parseExpression(self.value, scope)
 
-	def __repr__(self):
-		return '%s=%s' % (self.name, self.getValue())
-
 class VBScriptParameter(VBScriptElement):
 	pattern = ( '^(?P<type>ByVal |ByRef )?\\s*(?P<name>%s)$' % VBSCRIPT_VAR_NAME_PATTERN)
 
@@ -208,9 +223,6 @@ class VBScriptParameter(VBScriptElement):
 	@classmethod
 	def getMatch(cls, line):
 		return re.match(cls.pattern, line)
-
-	def __repr__(self):
-		return '%s %s' % (self.type, self.name)
 
 class VBScriptScope(VBScriptElement):
 	def __init__(self):
@@ -268,19 +280,21 @@ class VBScriptScope(VBScriptElement):
 
 	def getLineCombinedScope(self, line):
 		scopes = [self]
-		return self
-		""" TODO
+		
 		for scope in scopes:
-			for block in scope.getSubBlocks():
-				if issubclass(self.__class__, VBScriptScopeGlobal) or (line in self.scopeRange()):
+			for block in scope.getSubBlocks():		
+				if issubclass(VBScriptScopeGlobal, block.__class__):
 					scopes.append(block)
-
+				elif block.lineInScope(line):
+					scopes.append(block)
+		
+		
+		print('line=%s scopes=%r' % (line, map(lambda x:x.__class__, scopes)))
 		outputScope = VBScriptScope()
 		for scope in scopes:
 			outputScope.addScope(scope)
 
 		return outputScope
-		"""
 
 	@classmethod
 	def getNewScope(cls, line, comment, lineNo):
@@ -293,8 +307,13 @@ class VBScriptScope(VBScriptElement):
 	def hasEnded(self):
 		return (None != self.scopeRange)
 
-	def scopeRange(self):
+	def getScopeRange(self):
 		return self.scopeRange
+
+	def lineInScope(self, line):
+		scopeRange = self.getScopeRange()
+		# should never be none when called (TODO - maybe raise error instead)
+		return (scopeRange != None) and (line in scopeRange)
 
 	def parseLine(self, line, comment, lineNo, globalScope):
 		if self.isEnd(line):
@@ -322,9 +341,6 @@ class VBScriptScope(VBScriptElement):
 
 	def getName(self):
 		raise NotImplementedError('.getName() methods has not been implemented for the class=%s' % self.__class__.__name__)
-
-	def __repr__(self):
-		return 'variables=%s blocks=%s' % (self.variables, self.blocks)
 
 class VBScriptScopeGlobal(VBScriptScope):
 	def __init__(self):
@@ -433,6 +449,7 @@ class VBScriptBlockMethod(VBScriptBlock):
 class VBScriptBlockFunction(VBScriptBlockMethod, VBScriptCanReturnValue):
 	def __init__(self, blockStartLine, comment, lineNo):
 		VBScriptBlockMethod.__init__(self, blockStartLine, comment, lineNo)
+		VBScriptCanReturnValue.__init__(self)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -445,9 +462,6 @@ class VBScriptBlockFunction(VBScriptBlockMethod, VBScriptCanReturnValue):
 			return self.getVariable(self.name)
 		else:
 			return None
-
-	def __repr__(self):
-		return '%s return=%s' % (VBScriptBlockMethod.__repr__(self), self.getValue())
 
 class VBScriptBlockSub(VBScriptBlockMethod):
 	def __init__(self, blockStartLine, comment, lineNo):
@@ -462,6 +476,7 @@ class VBScriptBlockSub(VBScriptBlockMethod):
 class VBScriptBlockPropertyGet(VBScriptBlockMethod, VBScriptCanReturnValue):
 	def __init__(self, blockStartLine, comment, lineNo):
 		VBScriptBlockMethod.__init__(self, blockStartLine, comment, lineNo)
+		VBScriptCanReturnValue.__init__(self)
 
 	# needs to be called before the class pattern parameters are used (could find nice way to run static init block of code)
 	@classmethod
@@ -474,9 +489,6 @@ class VBScriptBlockPropertyGet(VBScriptBlockMethod, VBScriptCanReturnValue):
 			return self.getVariable(self.name)
 		else:
 			return None
-
-	def __repr__(self):
-		return '%s\nreturn=%s' % (VBScriptBlockMethod.__repr__(self), self.getValue())
 
 class VBScriptBlockPropertyLet(VBScriptBlockMethod):
 	def __init__(self, blockStartLine, comment, lineNo):
@@ -613,14 +625,15 @@ def parseVBScriptLibrary(path):
 
 	# raises error if a non-global block has not been closed
 	if len(currentScopeStack) > 1:
-		raise ValueError('Unclosed VBScript blocks=%r' % currentScopeStack[1:])
+		raise ValueError('Unclosed VBScript blocks=%r' % map(lambda x:[x.__class__, x.name],currentScopeStack[1:]) )
 
 	return scopes
 
 def getVBScriptLines(path):
 	# list of the from [[line, pos], ...]
 	lines = []
-	pos = 0
+	# line indexes start a 1 to match sublime's line numbering
+	pos = 1
 	lastCodeLinePos = None
 	with openTryEncodings(path) as f:
 		for line in f:
