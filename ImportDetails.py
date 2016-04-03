@@ -4,6 +4,8 @@ import os, codecs, re
 """ TODO
  - get so can deal will expressions of the for (new mycls).getAnotherCls(param1, "sd", 4).variables
  - differentiate between method and class blocks (instead of getSubBlock() method replace with getMethod() and getClass())
+ - get to deal with Import, ImportNew and ImportTemplate methods (will need to be aware that Import.qfl will be associated 
+ 	too so deal with thses before the normal methods and classes after primatives)
 """
 
 # \w is equivalent to [a-zA-Z0-9_] in a regex
