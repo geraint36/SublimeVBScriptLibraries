@@ -19,15 +19,11 @@ import sublime
 path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if not path in sys.path:
 	sys.path.insert(1, path)
-# cleans up the path variables
+# cleans up the path variable
 del path
 """
 
-from VBScriptLibraryUtil import ImportDetails
-print(dir(ImportDetails))
-#from VBScriptLibraryUtil.ImportDetails import VBScriptBlockSub
-print(ImportDetails.isVBScriptFile("asd"))
-
+import ImportDetails
 
 FILE_FOLDER_NAME_REGEX = 'a-zA-Z0-9_\\-'
 LIBRARY_PARENT_FOLDER = '\\TestLibrary\\'
@@ -52,19 +48,16 @@ class ImportedClassesMethods(sublime_plugin.EventListener):
 			return []
 
 		# to get the preceeding word (which could be a varaible storing a library)
-		print(words)
 		words = getVariableTreeBeforeCursor(view)
-		print(words)
 
+		# TODO - change so uses actual view text (including edits) instead of the saved file
+		libDetails = ImportDetails.LibraryDetailsCache.getDetails(filePath)
 
-		# TODO - from here on finish code
-		d = ImportDetails.LibraryDetailsCache.getDetails(filePath)
-		print(d)
-		
-
-		# gets a dictionary of all the imports used in the currently opened file 
-		# looks at the saved version no sublime's opened one
-		currentViewContentStr = getViewText(view)
+		#print(libDetails[0])
+		#print(libDetails[0].getVariable('aman').valueStr)
+		print('fnc1 - %s' % libDetails[0].getSubBlock("fnc1").getValue())
+		print('aman - %s' % libDetails[0].getVariable('aman').getValue())
+		print('user - %s' % libDetails[0].getVariable('user').getValue())
 
 		# if an empty list is returned from this method then the standard sublime suggestions will be used
 		# this means that after any keyword that stores a library none of the standard suggestions will be 

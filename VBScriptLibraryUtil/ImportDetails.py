@@ -2,7 +2,7 @@ import os, codecs, re
 #import time
 
 # \w is equivalent to [a-zA-Z0-9_] in a regex
-VBSCRIPT_VAR_NAME_PATTERN = '\\b[a-zA-Z]{1}\w{0,254}\\b'
+VBSCRIPT_VAR_NAME_PATTERN = '\\b[a-zA-Z]{1}\\w{0,254}\\b'
 
 class FileNotFoundException(Exception):
 	def __init__(self,*args,**kwargs):
@@ -39,8 +39,10 @@ class VBScriptCanReturnValue(object):
 
 class VBScriptVariable(VBScriptElement, VBScriptCanReturnValue):
 	pattern = ( '^(?P<type>Set )?\\s*(?P<name>%s)\\s*=(?P<value>.+)$' % VBSCRIPT_VAR_NAME_PATTERN )
-	string_pattern = '"[^"]*"' # needs more adding doesn't allow for escaped " chars ("""")
+	string_pattern = '"(""|[^"])*"' # needs more adding doesn't allow for escaped " chars ("""")
 	number_pattern = '([1-9][0-9]*|0)(\\.[0-9])?'
+	# \w is equivalent to [a-zA-Z0-9_]
+	call_expression_pattern = '[\\w. \\(\\),]'
 
 	def __init__(self, line, lineNo, comment, globalScope):
 		VBScriptElement.__init__(self)
@@ -69,9 +71,11 @@ class VBScriptVariable(VBScriptElement, VBScriptCanReturnValue):
 
 	def getContents(self):
 		if not self.contentsCalculated:
+			print('before=%s' % self.value)
 			currentScope = self.globalScopeRef.getLineCombinedScope(self.lineNo)
 			self.parseValue(currentScope)
 			self.contentsCalculated = True
+			print('after=%s' % self.value)
 
  		return self.value
 
@@ -105,28 +109,77 @@ class VBScriptVariable(VBScriptElement, VBScriptCanReturnValue):
 	def isNumber(cls, inputValue):
 		return None != re.match( cls.number_pattern, inputValue, re.IGNORECASE )
 
+	@classmethod
+	def isCallExpression(cls, inputValue):
+		return None != re.match( cls.call_expression_pattern, inputValue, re.IGNORECASE )
+
 	# TODO - addin code for things of the form 'var.meth(param1, param2).var2' etc. (allow for dots)
 	@classmethod
-	def parseExpression(cls, inputValue, scope):
+	def parseSingleExpression(cls, inputValue, scope):
 		formattedValue = cls.formatMethodVariableName(inputValue)
-		# if value is variable that is defined in the current scope
-		if scope.containsVariable(formattedValue):
-			return scope.getVariable(formattedValue)
-		# if value is code block (class or method) that is defined in the current scope
-		elif scope.containsSubBlock(formattedValue):
-			return scope.getSubBlock(formattedValue)	
 		# if is a string
-		elif cls.isString(formattedValue):
+		if cls.isString(formattedValue):
 			return formattedValue[1:-1]
 		# if is a number
 		elif cls.isNumber(formattedValue):
 			return float(formattedValue)
-		# if unknown store None
-		else:
-			return None
+		# case for variable/methods and classes (with possible calls to sub methods etc.)
+		elif cls.isCallExpression(formattedValue):
+			callStack = formattedValue.split('.')
+			print(callStack)
+			#########################################################################################
+			# TODO - finish this code too tired at the moment (parseSingleExpression and parseExpression)
+			#########################################################################################
+
+			for i in range(len(callStack)):
+				call = cls.formatMethodVariableName(callStack[i])
+				output = scope
+
+				# only classes can have sub properties and methods
+				if ( i < (len(callStack)-1) ):
+					# if value is variable that is defined in the current scope
+					if output.containsVariable(call):
+						output = output.getVariable(call).getValue()
+					# if value is code block (class or method) that is defined in the current scope
+					elif output.containsSubBlock(call):
+						output = output.getSubBlock(call)
+				# if last element in the call stack then doesn't need to be a class
+				elif (i == (len(callStack) - 1)):
+					# if value is variable that is defined in the current scope
+					if output.containsVariable(call):
+						output = output.getVariable(call)
+					# if value is code block (class or method) that is defined in the current scope
+					elif output.containsSubBlock(call):
+						output = output.getSubBlock(call)
+					else:
+						return None
+					return output
+				else:
+					return None
+		
+		# if unknown return None
+		return None
+
+	@classmethod
+	def parseExpression(cls, inputValue, scope):
+		formattedValue = cls.formatMethodVariableName(inputValue)
+		callStack = formattedValue.split('.')
+		print("callstack=%s" % callStack)
+		# TODO - finish this code too tired at the moment
+		
+		for i in range(len(callStack)):
+			call = cls.formatMethodVariableName(callStack[i])
+			output = scope
+
+			output = cls.parseSingleExpression(call, output)
+		
+		return output
 
 	def parseValue(self, scope):
 		self.value = self.parseExpression(self.value, scope)
+
+	def __repr__(self):
+		return '%s=%s' % (self.name, self.getValue())
 
 class VBScriptParameter(VBScriptElement):
 	pattern = ( '^(?P<type>ByVal |ByRef )?\\s*(?P<name>%s)$' % VBSCRIPT_VAR_NAME_PATTERN)
@@ -155,6 +208,9 @@ class VBScriptParameter(VBScriptElement):
 	@classmethod
 	def getMatch(cls, line):
 		return re.match(cls.pattern, line)
+
+	def __repr__(self):
+		return '%s %s' % (self.type, self.name)
 
 class VBScriptScope(VBScriptElement):
 	def __init__(self):
@@ -212,7 +268,8 @@ class VBScriptScope(VBScriptElement):
 
 	def getLineCombinedScope(self, line):
 		scopes = [self]
-
+		return self
+		""" TODO
 		for scope in scopes:
 			for block in scope.getSubBlocks():
 				if issubclass(self.__class__, VBScriptScopeGlobal) or (line in self.scopeRange()):
@@ -223,6 +280,7 @@ class VBScriptScope(VBScriptElement):
 			outputScope.addScope(scope)
 
 		return outputScope
+		"""
 
 	@classmethod
 	def getNewScope(cls, line, comment, lineNo):
@@ -264,6 +322,9 @@ class VBScriptScope(VBScriptElement):
 
 	def getName(self):
 		raise NotImplementedError('.getName() methods has not been implemented for the class=%s' % self.__class__.__name__)
+
+	def __repr__(self):
+		return 'variables=%s blocks=%s' % (self.variables, self.blocks)
 
 class VBScriptScopeGlobal(VBScriptScope):
 	def __init__(self):
@@ -385,6 +446,9 @@ class VBScriptBlockFunction(VBScriptBlockMethod, VBScriptCanReturnValue):
 		else:
 			return None
 
+	def __repr__(self):
+		return '%s return=%s' % (VBScriptBlockMethod.__repr__(self), self.getValue())
+
 class VBScriptBlockSub(VBScriptBlockMethod):
 	def __init__(self, blockStartLine, comment, lineNo):
 		VBScriptBlockMethod.__init__(self, blockStartLine, comment, lineNo)
@@ -410,6 +474,9 @@ class VBScriptBlockPropertyGet(VBScriptBlockMethod, VBScriptCanReturnValue):
 			return self.getVariable(self.name)
 		else:
 			return None
+
+	def __repr__(self):
+		return '%s\nreturn=%s' % (VBScriptBlockMethod.__repr__(self), self.getValue())
 
 class VBScriptBlockPropertyLet(VBScriptBlockMethod):
 	def __init__(self, blockStartLine, comment, lineNo):
